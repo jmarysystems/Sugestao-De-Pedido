@@ -1,6 +1,6 @@
 // Pedidos Sugeridos: agrupa os itens da lista por fornecedor.
-import { listar } from '../api.js?v=20261121a';
-import * as ui from '../ui.js?v=20261121a';
+import { listar } from '../api.js?v=20261121b';
+import * as ui from '../ui.js?v=20261121b';
 
 export async function render(raiz, ctx) {
   ctx.setTitulo('Pedidos Sugeridos');
@@ -21,7 +21,7 @@ export async function render(raiz, ctx) {
 
   const mapaFornecedor = new Map();
   for (const v of vinculos) {
-    if (v.produto_id) mapaFornecedor.set(v.produto_id, v.fornecedores?.razao_social || 'Sem fornecedor');
+    if (v.produto_id) mapaFornecedor.set(v.produto_id, v.fornecedores?.razao_social || null);
   }
 
   raiz.innerHTML = `
@@ -44,8 +44,11 @@ export async function render(raiz, ctx) {
 
     const daLista = itens.filter((i) => i.lista === lista);
     const grupos = new Map();
+
     for (const item of daLista) {
-      const fornecedor = (item.produto_id && mapaFornecedor.get(item.produto_id)) || 'Sem fornecedor';
+      const fornecedor = item.fornecedor_nome
+        || (item.produto_id && mapaFornecedor.get(item.produto_id))
+        || 'Sem fornecedor';
       if (!grupos.has(fornecedor)) grupos.set(fornecedor, []);
       grupos.get(fornecedor).push(item);
     }
@@ -55,31 +58,43 @@ export async function render(raiz, ctx) {
       return;
     }
 
+    const valorTotalGeral = daLista.reduce(
+      (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
+
     conteudo.innerHTML = [...grupos.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([fornecedor, lista_itens]) => {
-        const total = lista_itens.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+      .map(([fornecedor, listaItens]) => {
+        const total = listaItens.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+        const valor = listaItens.reduce(
+          (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
+        const prazo = Math.max(...listaItens.map((i) => Number(i.prazo_entrega) || 0));
+
         return `<div class="cartao">
           <div class="cartao-topo">
             <h2>${ui.esc(fornecedor)}</h2>
-            <span class="sub">${lista_itens.length} item(ns) · total ${ui.num(total, 2)}</span>
+            <span class="sub">${listaItens.length} item(ns) · ${ui.num(total, 2)} un. ·
+              ${ui.brl(valor)}${prazo ? ` · prazo ${prazo} dia(s)` : ''}</span>
           </div>
           <div class="tabela-rolagem"><table>
-            <thead><tr><th>SKU</th><th>Descrição</th><th>Un.</th>
-              <th class="num">Quantidade</th></tr></thead>
+            <thead><tr><th>Loja</th><th>SKU</th><th>Descrição</th><th>Embalagem</th>
+              <th class="num">Qtd</th><th class="num">Valor un.</th><th class="num">Total</th></tr></thead>
             <tbody>
-              ${lista_itens.map((i) => `<tr>
+              ${listaItens.map((i) => `<tr>
+                <td>${ui.esc(i.loja || '—')}</td>
                 <td class="mono">${ui.esc(i.sku || '')}</td>
                 <td>${ui.esc(i.descricao || '')}</td>
-                <td>${ui.esc(i.unidade || '')}</td>
+                <td>${ui.esc(i.embalagem || i.unidade || '')}</td>
                 <td class="num">${ui.num(i.quantidade, 2)}</td>
+                <td class="num">${i.valor_unitario != null ? ui.brl(i.valor_unitario) : '—'}</td>
+                <td class="num">${ui.brl((Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0))}</td>
               </tr>`).join('')}
             </tbody>
-            <tfoot><tr><th colspan="3">Total</th>
-              <th class="num">${ui.num(total, 2)}</th></tr></tfoot>
+            <tfoot><tr><th colspan="6">Total</th>
+              <th class="num">${ui.brl(valor)}</th></tr></tfoot>
           </table></div>
         </div>`;
-      }).join('');
+      }).join('')
+      + `<div class="cartao"><strong>Total geral da lista:</strong> ${ui.brl(valorTotalGeral)}</div>`;
   }
 
   selLista.addEventListener('change', desenhar);
