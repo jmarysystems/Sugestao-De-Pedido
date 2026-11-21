@@ -1,6 +1,6 @@
 // Sugestão de Pedido: monta a lista, importa planilha e edita quantidades.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261121b';
-import * as ui from '../ui.js?v=20261121b';
+import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261121c';
+import * as ui from '../ui.js?v=20261121c';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -14,6 +14,32 @@ const num = (v) => {
   const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
   return Number.isNaN(n) ? null : n;
 };
+
+// Opções de cálculo do "Total do Estoque Para Manter"
+const MODOS = [
+  { valor: 'es', rotulo: 'Estoque de Segurança',
+    descricao: 'ES' },
+  { valor: 'es_dias', rotulo: 'ES + (Venda Média × Dias de Venda)',
+    descricao: 'ES + vendas do período' },
+  { valor: 'es_prazo', rotulo: 'ES + (Venda Média × Prazo do Fornecedor)',
+    descricao: 'ES + vendas do prazo' },
+  { valor: 'es_dias_prazo', rotulo: 'ES + (Venda Média × (Dias de Venda + Prazo))',
+    descricao: 'ES + vendas de todo o ciclo' },
+];
+
+function calcularEstoqueManter(item) {
+  const es = Number(item.estoque_seguranca) || 0;
+  const venda = Number(item.venda_media) || 0;
+  const dias = Number(item.dias_venda) || 0;
+  const prazo = Number(item.prazo_entrega) || 0;
+
+  switch (item.modo_estoque || 'es_dias') {
+    case 'es': return es;
+    case 'es_prazo': return es + venda * prazo;
+    case 'es_dias_prazo': return es + venda * (dias + prazo);
+    default: return es + venda * dias;
+  }
+}
 
 const COLUNAS = {
   loja: ['LOJA'],
@@ -94,6 +120,17 @@ export async function render(raiz, ctx) {
         <h2>Itens da lista <span id="nome-lista"></span></h2>
         <span class="sub" id="resumo"></span>
       </div>
+
+      <div class="linha-acoes" style="margin-bottom:12px;flex-wrap:wrap">
+        <label class="campo" style="max-width:420px;margin:0"><span>Calcular todas as linhas com</span>
+          <select id="modo-padrao">
+            ${MODOS.map((m) => `<option value="${m.valor}">${ui.esc(m.rotulo)}</option>`).join('')}
+          </select></label>
+        <button type="button" class="botao-pequeno" id="aplicar-modo">Aplicar a todas</button>
+        <button type="button" class="botao-pequeno" id="aplicar-sugestao">Usar a quantidade sugerida</button>
+        <span class="sub" id="calc-status"></span>
+      </div>
+
       <div id="tabela"></div>
     </div>`;
 
@@ -129,20 +166,37 @@ export async function render(raiz, ctx) {
     tabela.innerHTML = daLista.length ? `
       <div class="tabela-rolagem"><table>
         <thead><tr>
-          <th>Loja</th><th>SKU</th><th>Descrição</th><th>Embalagem</th>
-          <th class="num">Estoque</th><th>Fornecedor</th><th class="num">Prazo</th>
-          <th class="num">Valor un.</th><th class="num">Qtd a pedir</th><th></th>
+          <th>Loja</th><th>SKU</th><th>Descrição</th><th>Emb.</th>
+          <th class="num">Estoque</th><th class="num">Segurança</th>
+          <th class="num">Venda méd.</th><th>Total do Estoque Para Manter</th>
+          <th class="num">Qtd sugerida</th><th class="num">Qtd a pedir</th><th></th>
         </tr></thead>
         <tbody>
-          ${daLista.map((i) => `<tr>
+          ${daLista.map((i) => {
+            const manter = calcularEstoqueManter(i);
+            const sugerida = Math.max(0, Math.round((manter - estoqueTotal(i)) * 1000) / 1000);
+            return `<tr>
             <td>${ui.esc(i.loja || '—')}</td>
             <td class="mono">${ui.esc(i.sku || '')}</td>
-            <td>${ui.esc(i.descricao || '')}</td>
+            <td title="${ui.esc(i.fornecedor_nome || '')}">${ui.esc(i.descricao || '')}</td>
             <td>${ui.esc(i.embalagem || i.unidade || '')}</td>
             <td class="num">${ui.num(estoqueTotal(i), 0)}</td>
-            <td>${ui.esc(i.fornecedor_nome || '—')}</td>
-            <td class="num">${i.prazo_entrega ?? '—'}</td>
-            <td class="num">${i.valor_unitario != null ? ui.brl(i.valor_unitario) : '—'}</td>
+            <td class="num"><input type="number" step="0.001" value="${i.estoque_seguranca ?? 0}"
+                  data-es="${ui.esc(i.id)}" style="width:80px;text-align:right"
+                  ${podeEditar ? '' : 'disabled'}></td>
+            <td class="num"><input type="number" step="0.001" value="${i.venda_media ?? ''}"
+                  data-venda="${ui.esc(i.id)}" style="width:80px;text-align:right"
+                  ${podeEditar ? '' : 'disabled'}></td>
+            <td>
+              <select data-modo="${ui.esc(i.id)}" style="max-width:260px"
+                      ${podeEditar ? '' : 'disabled'}>
+                ${MODOS.map((m) => `<option value="${m.valor}" ${
+                  (i.modo_estoque || 'es_dias') === m.valor ? 'selected' : ''}>${
+                  ui.esc(m.rotulo)}</option>`).join('')}
+              </select>
+              <div class="sub" style="font-size:11px">Total: <strong>${ui.num(manter, 2)}</strong></div>
+            </td>
+            <td class="num">${ui.num(sugerida, 2)}</td>
             <td class="num">
               <input type="number" step="0.001" value="${i.quantidade ?? 0}"
                      data-qtd="${ui.esc(i.id)}" style="width:100px;text-align:right"
@@ -150,7 +204,8 @@ export async function render(raiz, ctx) {
             </td>
             <td>${podeExcluir ? `<button type="button" class="botao-pequeno botao-perigo"
               data-remover="${ui.esc(i.id)}">Remover</button>` : ''}</td>
-          </tr>`).join('')}
+          </tr>`;
+          }).join('')}
         </tbody>
       </table></div>` : ui.vazio('Nenhum item nesta lista. Use a importação ou a busca acima.');
 
@@ -163,6 +218,52 @@ export async function render(raiz, ctx) {
           if (item) item.quantidade = Number(campo.value) || 0;
           desenhar();
         } catch (erro) { ui.toast(erro.message, 'erro'); }
+      });
+    }
+
+    async function salvarCalculo(item) {
+      const manter = calcularEstoqueManter(item);
+      const sugerida = Math.max(0,
+        Math.round((manter - estoqueTotal(item)) * 1000) / 1000);
+      item.estoque_manter = manter;
+      item.quantidade_sugerida = sugerida;
+      await atualizar('lista_de_produtos', item.id, {
+        estoque_seguranca: Number(item.estoque_seguranca) || 0,
+        venda_media: item.venda_media === '' ? null : Number(item.venda_media),
+        modo_estoque: item.modo_estoque || 'es_dias',
+        estoque_manter: manter,
+        quantidade_sugerida: sugerida,
+      });
+      return sugerida;
+    }
+
+    for (const el of tabela.querySelectorAll('[data-es]')) {
+      el.addEventListener('change', async () => {
+        const item = itens.find((i) => i.id === el.dataset.es);
+        if (!item) return;
+        item.estoque_seguranca = Number(el.value) || 0;
+        try { await salvarCalculo(item); desenhar(); }
+        catch (erro) { ui.toast(erro.message, 'erro'); }
+      });
+    }
+
+    for (const el of tabela.querySelectorAll('[data-venda]')) {
+      el.addEventListener('change', async () => {
+        const item = itens.find((i) => i.id === el.dataset.venda);
+        if (!item) return;
+        item.venda_media = el.value === '' ? null : Number(el.value);
+        try { await salvarCalculo(item); desenhar(); }
+        catch (erro) { ui.toast(erro.message, 'erro'); }
+      });
+    }
+
+    for (const el of tabela.querySelectorAll('[data-modo]')) {
+      el.addEventListener('change', async () => {
+        const item = itens.find((i) => i.id === el.dataset.modo);
+        if (!item) return;
+        item.modo_estoque = el.value;
+        try { await salvarCalculo(item); desenhar(); }
+        catch (erro) { ui.toast(erro.message, 'erro'); }
       });
     }
 
@@ -179,6 +280,54 @@ export async function render(raiz, ctx) {
       });
     }
   }
+
+  raiz.querySelector('#aplicar-modo')?.addEventListener('click', async () => {
+    const modo = raiz.querySelector('#modo-padrao').value;
+    const status = raiz.querySelector('#calc-status');
+    const daLista = itensDaLista();
+    if (!daLista.length) return;
+
+    if (status) status.textContent = `calculando ${daLista.length} linha(s)…`;
+    try {
+      for (const item of daLista) {
+        item.modo_estoque = modo;
+        const manter = calcularEstoqueManter(item);
+        item.estoque_manter = manter;
+        item.quantidade_sugerida = Math.max(0,
+          Math.round((manter - estoqueTotal(item)) * 1000) / 1000);
+        await atualizar('lista_de_produtos', item.id, {
+          modo_estoque: modo,
+          estoque_manter: item.estoque_manter,
+          quantidade_sugerida: item.quantidade_sugerida,
+        });
+      }
+      if (status) status.textContent = 'cálculo aplicado';
+      ui.toast('Cálculo aplicado a todas as linhas.');
+      desenhar();
+    } catch (erro) {
+      ui.toast(erro.message, 'erro');
+      if (status) status.textContent = '';
+    }
+  });
+
+  raiz.querySelector('#aplicar-sugestao')?.addEventListener('click', async () => {
+    const daLista = itensDaLista();
+    if (!daLista.length) return;
+    if (!window.confirm(`Copiar a quantidade sugerida para "Qtd a pedir" em ${daLista.length} linha(s)?`)) return;
+
+    try {
+      for (const item of daLista) {
+        const manter = calcularEstoqueManter(item);
+        const sugerida = Math.max(0, Math.round((manter - estoqueTotal(item)) * 1000) / 1000);
+        item.quantidade = sugerida;
+        await atualizar('lista_de_produtos', item.id, {
+          quantidade: sugerida, quantidade_sugerida: sugerida, estoque_manter: manter,
+        });
+      }
+      ui.toast('Quantidade sugerida aplicada.');
+      desenhar();
+    } catch (erro) { ui.toast(erro.message, 'erro'); }
+  });
 
   selLista.addEventListener('change', () => {
     if (selLista.value === '__nova') {
