@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122i';
-import * as ui from '../ui.js?v=20261122i';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122j';
+import * as ui from '../ui.js?v=20261122j';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -328,6 +328,16 @@ async function renderEditor(raiz, ctx, lista) {
         <span class="sub" id="calc-status"></span>
       </div>
 
+      <div class="linha-acoes" style="margin-bottom:12px;flex-wrap:wrap">
+        <label class="campo" style="max-width:190px;margin:0"><span>Dias de venda p/ todos</span>
+          <input type="number" id="dias-todos" min="0" placeholder="ex.: 7"></label>
+        <button type="button" class="botao-pequeno" id="aplicar-dias">Aplicar dias</button>
+        <label class="campo" style="max-width:190px;margin:0"><span>Prazo do fornecedor p/ todos</span>
+          <input type="number" id="prazo-todos" min="0" placeholder="ex.: 2"></label>
+        <button type="button" class="botao-pequeno" id="aplicar-prazo">Aplicar prazo</button>
+        <span class="sub" id="lote-status"></span>
+      </div>
+
       <div id="tabela"></div>
     </div>
 
@@ -365,7 +375,8 @@ async function renderEditor(raiz, ctx, lista) {
         <thead><tr>
           <th>Loja</th><th>SKU</th><th>Descrição</th><th>Emb.</th>
           <th class="num">Estoque</th><th class="num">Segurança</th>
-          <th class="num">Venda méd.</th><th>Total do Estoque Para Manter</th>
+          <th class="num">Venda méd.</th><th class="num">Dias venda</th>
+          <th class="num">Prazo forn.</th><th>Total do Estoque Para Manter</th>
           <th class="num">Qtd sugerida</th><th class="num">Qtd a pedir</th><th></th>
         </tr></thead>
         <tbody>
@@ -381,6 +392,12 @@ async function renderEditor(raiz, ctx, lista) {
               ${ui.num(estoqueSeguranca(i), 0)}</td>
             <td class="num"><input type="number" step="0.001" value="${i.venda_media ?? ''}"
                   data-venda="${ui.esc(i.id)}" style="width:80px;text-align:right"
+                  ${podeEditar ? '' : 'disabled'}></td>
+            <td class="num"><input type="number" step="1" min="0" value="${i.dias_venda ?? ''}"
+                  data-dias="${ui.esc(i.id)}" style="width:70px;text-align:right"
+                  ${podeEditar ? '' : 'disabled'}></td>
+            <td class="num"><input type="number" step="1" min="0" value="${i.prazo_entrega ?? ''}"
+                  data-prazo="${ui.esc(i.id)}" style="width:70px;text-align:right"
                   ${podeEditar ? '' : 'disabled'}></td>
             <td>
               <select data-modo="${ui.esc(i.id)}" style="max-width:280px"
@@ -443,6 +460,8 @@ async function renderEditor(raiz, ctx, lista) {
       await atualizar('lista_de_produtos', item.id, {
         estoque_seguranca: item.estoque_seguranca,
         venda_media: item.venda_media === '' ? null : Number(item.venda_media),
+        dias_venda: item.dias_venda === '' ? null : Number(item.dias_venda),
+        prazo_entrega: item.prazo_entrega === '' ? null : Number(item.prazo_entrega),
         modo_estoque: item.modo_estoque || 'es_dias',
         estoque_manter: manter,
         quantidade_sugerida: sugerida,
@@ -454,6 +473,26 @@ async function renderEditor(raiz, ctx, lista) {
         const item = itens.find((i) => i.id === el.dataset.venda);
         if (!item) return;
         item.venda_media = el.value === '' ? null : Number(el.value);
+        try { await salvarCalculo(item); desenhar(); }
+        catch (erro) { ui.toast(erro.message, 'erro'); }
+      });
+    }
+
+    for (const el of tabela.querySelectorAll('[data-dias]')) {
+      el.addEventListener('change', async () => {
+        const item = itens.find((i) => i.id === el.dataset.dias);
+        if (!item) return;
+        item.dias_venda = el.value === '' ? null : Number(el.value);
+        try { await salvarCalculo(item); desenhar(); }
+        catch (erro) { ui.toast(erro.message, 'erro'); }
+      });
+    }
+
+    for (const el of tabela.querySelectorAll('[data-prazo]')) {
+      el.addEventListener('change', async () => {
+        const item = itens.find((i) => i.id === el.dataset.prazo);
+        if (!item) return;
+        item.prazo_entrega = el.value === '' ? null : Number(el.value);
         try { await salvarCalculo(item); desenhar(); }
         catch (erro) { ui.toast(erro.message, 'erro'); }
       });
@@ -685,6 +724,49 @@ async function renderEditor(raiz, ctx, lista) {
       ui.toast(erro.message, 'erro');
       if (status) status.textContent = '';
     }
+  });
+
+  async function aplicarEmTodos(campo, valor, rotulo) {
+    const listaItens = daLista();
+    const status = raiz.querySelector('#lote-status');
+    if (!listaItens.length) { ui.toast('Nenhum item na sugestão.', 'erro'); return; }
+
+    if (valor === null || valor === '' || Number.isNaN(Number(valor))) {
+      ui.toast(`Informe ${rotulo}.`, 'erro');
+      return;
+    }
+
+    if (status) status.textContent = `aplicando ${rotulo} em ${listaItens.length} linha(s)…`;
+
+    try {
+      for (const item of listaItens) {
+        item[campo] = Number(valor);
+        item.estoque_seguranca = estoqueSeguranca(item);
+        item.estoque_manter = calcularEstoqueManter(item);
+        item.quantidade_sugerida = sugeridaDe(item);
+        await atualizar('lista_de_produtos', item.id, {
+          [campo]: Number(valor),
+          estoque_seguranca: item.estoque_seguranca,
+          estoque_manter: item.estoque_manter,
+          quantidade_sugerida: item.quantidade_sugerida,
+        });
+      }
+      if (status) status.textContent = `${rotulo} aplicado a ${listaItens.length} item(ns)`;
+      ui.toast(`${rotulo} aplicado a todos os itens.`);
+      ctx.recarregar();
+    } catch (erro) {
+      ui.toast(erro.message, 'erro');
+      if (status) status.textContent = '';
+    }
+  }
+
+  raiz.querySelector('#aplicar-dias')?.addEventListener('click', () => {
+    aplicarEmTodos('dias_venda', raiz.querySelector('#dias-todos').value, 'dias de venda');
+  });
+
+  raiz.querySelector('#aplicar-prazo')?.addEventListener('click', () => {
+    aplicarEmTodos('prazo_entrega', raiz.querySelector('#prazo-todos').value,
+      'prazo do fornecedor');
   });
 
   raiz.querySelector('#aplicar-sugestao')?.addEventListener('click', async () => {
