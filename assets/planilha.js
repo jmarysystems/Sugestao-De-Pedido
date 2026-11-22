@@ -1,5 +1,5 @@
 // Leitura de planilha e importação de listas (usada nas telas de Listas e Sugestão).
-import { listar, criar } from './api.js?v=20261122o';
+import { listar, criar } from './api.js?v=20261122p';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -284,7 +284,7 @@ export async function importarLista({
   }
 
   if (limpar) {
-    const { excluirOnde } = await import('./api.js?v=20261122o');
+    const { excluirOnde } = await import('./api.js?v=20261122p');
     await excluirOnde('lista_de_produtos', { lista });
   }
 
@@ -297,10 +297,7 @@ export async function importarLista({
     }
   }
 
-  const existentes = await listar('sugestoes', { eq: { nome: lista } });
-  if (!existentes.length) {
-    await criar('sugestoes', { nome: lista, status: 'rascunho' });
-  }
-
+  // A lista é só um molde: a sugestão de pedido é criada depois,
+  // quando o usuário escolher "Nova sugestão".
   return registros.length;
 }

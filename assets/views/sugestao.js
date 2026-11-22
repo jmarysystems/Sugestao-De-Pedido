@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122o';
-import * as ui from '../ui.js?v=20261122o';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122p';
+import * as ui from '../ui.js?v=20261122p';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -110,16 +110,19 @@ async function renderIndice(raiz, ctx) {
   const podeCriar = ctx.pode('sugestao', 'cadastrar') || ctx.pode('sugestao', 'editar');
   const podeExcluir = ctx.pode('sugestao', 'excluir');
 
-  const [itens, cabecalhos] = await Promise.all([
-    listar('lista_de_produtos', { ordem: 'ordem' }),
+  const [itens, sugestoes] = await Promise.all([
+    listar('lista_de_produtos', { ordem: 'ordem', limite: 5000 }),
     listar('sugestoes', { ordem: 'nome' }),
   ]);
 
-  const statusPorNome = new Map(cabecalhos.map((c) => [c.nome, c]));
-  const grupos = new Map();
+  // listas disponíveis como base (qualquer lista com itens)
+  const listasBase = new Set(itens.map((i) => i.lista));
+  for (const s of sugestoes) listasBase.add(s.nome);
 
+  // totais por lista
+  const totais = new Map();
   for (const item of itens) {
-    const atual = grupos.get(item.lista) || {
+    const atual = totais.get(item.lista) || {
       itens: 0, quantidade: 0, valor: 0, sugerida: 0, criado: null, lojas: new Set(),
     };
     atual.itens += 1;
@@ -130,28 +133,30 @@ async function renderIndice(raiz, ctx) {
     if (item.importado_em && (!atual.criado || item.importado_em < atual.criado)) {
       atual.criado = item.importado_em;
     }
-    grupos.set(item.lista, atual);
+    totais.set(item.lista, atual);
   }
 
-  const linhas = [...grupos.entries()]
-    .sort((a, b) => (b[1].criado || '').localeCompare(a[1].criado || ''))
-    .map(([nome, d]) => {
-      const cab = statusPorNome.get(nome);
-      const st = STATUS[cab?.status || 'rascunho'] || STATUS.rascunho;
+  const sugestaoPorNome = new Map(sugestoes.map((s) => [s.nome, s]));
+
+  const linhas = [...sugestoes]
+    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
+    .map((s) => {
+      const d = totais.get(s.nome) || {
+        itens: 0, quantidade: 0, valor: 0, sugerida: 0, criado: null, lojas: new Set(),
+      };
+      const st = STATUS[s.status || 'rascunho'] || STATUS.rascunho;
       return `<tr>
-      <td><strong>${ui.esc(nome)}</strong></td>
+      <td><strong>${ui.esc(s.nome)}</strong></td>
       <td>${ui.badge(st.rotulo, st.cor)}</td>
       <td class="num">${ui.num(d.itens, 0)}</td>
       <td class="num">${ui.num(d.sugerida, 0)}</td>
       <td class="num">${ui.brl(d.valor)}</td>
       <td>${d.lojas.size ? [...d.lojas].sort().join(', ') : '—'}</td>
-      <td>${d.criado ? ui.dataBR(d.criado) : '—'}</td>
+      <td>${s.criado_em ? ui.dataBR(s.criado_em) : '—'}</td>
       <td class="acoes">
-        <a class="botao-pequeno" href="#/sugestao/${encodeURIComponent(nome)}">Abrir</a>
-        ${podeCriar ? `<a class="botao-pequeno"
-          href="#/sugestao/${encodeURIComponent(nome)}">Editar</a>` : ''}
+        <a class="botao-pequeno" href="#/sugestao/${encodeURIComponent(s.nome)}">Abrir</a>
         ${podeExcluir ? `<button type="button" class="botao-pequeno botao-perigo"
-          data-apagar="${ui.esc(nome)}">Excluir</button>` : ''}
+          data-apagar="${ui.esc(s.nome)}">Excluir</button>` : ''}
       </td>
     </tr>`;
     }).join('');
@@ -159,17 +164,18 @@ async function renderIndice(raiz, ctx) {
   raiz.innerHTML = `
     <div class="cartao">
       <div class="cartao-topo">
-        <h2>${grupos.size} sugestão(ões)</h2>
+        <h2>${sugestoes.length} sugestão(ões)</h2>
         ${podeCriar ? '<button type="button" class="botao-primario" id="nova">Nova sugestão</button>' : ''}
       </div>
-      <p class="sub">Cada sugestão é uma lista de produtos com as quantidades a pedir.
-        Abra para editar ou crie uma nova a partir de uma lista existente.</p>
-      ${grupos.size ? `<div class="tabela-rolagem"><table>
+      <p class="sub">A sugestão nasce de uma lista já importada. Ao criar, escolha a lista
+        base e o nome da nova sugestão — os itens são copiados.</p>
+      ${sugestoes.length ? `<div class="tabela-rolagem"><table>
         <thead><tr><th>Sugestão</th><th>Status</th><th class="num">Itens</th>
           <th class="num">Qtd sugerida</th><th class="num">Valor</th>
           <th>Lojas</th><th>Criada em</th><th></th></tr></thead>
         <tbody>${linhas}</tbody>
-      </table></div>` : ui.vazio('Nenhuma sugestão criada ainda.')}
+      </table></div>`
+        : ui.vazio('Nenhuma sugestão criada. Importe uma lista e clique em "Nova sugestão".')}
     </div>`;
 
   raiz.querySelector('#nova')?.addEventListener('click', () => {
@@ -178,12 +184,11 @@ async function renderIndice(raiz, ctx) {
       largura: '560px',
       corpo: `
         <p class="sub">Escolha a lista que servirá de base. Os itens são copiados
-          para a nova sugestão (a original não muda).</p>
+          para a nova sugestão (a lista original não muda).</p>
         <label class="campo"><span>Lista base</span>
           <select id="base">
-            <option value="">— lista vazia —</option>
-            ${[...grupos.keys()].sort().map((l) => `<option value="${ui.esc(l)}">${
-              ui.esc(l)} (${grupos.get(l).itens} itens)</option>`).join('')}
+            ${[...listasBase].sort().map((l) => `<option value="${ui.esc(l)}">${
+              ui.esc(l)} (${(totais.get(l)?.itens) || 0} itens)</option>`).join('')}
           </select></label>
         <label class="campo"><span>Nome da nova sugestão</span>
           <input id="nome" value="${ui.esc(`Sugestão ${new Date().toLocaleDateString('pt-BR')}`)}"></label>
@@ -200,38 +205,36 @@ async function renderIndice(raiz, ctx) {
       const base = corpo.querySelector('#base').value;
       const nome = corpo.querySelector('#nome').value.trim();
       const info = corpo.querySelector('#info');
+
       if (!nome) { ui.toast('Informe o nome da sugestão.', 'erro'); return; }
-      if (grupos.has(nome)) {
+      if (sugestaoPorNome.has(nome)) {
         ui.toast('Já existe uma sugestão com esse nome.', 'erro');
         return;
       }
+      if (!base) { ui.toast('Escolha a lista base.', 'erro'); return; }
 
       const botao = corpo.querySelector('#criar');
       botao.disabled = true;
       botao.textContent = 'Criando…';
 
       try {
-        await criar('sugestoes', { nome, status: 'rascunho' });
-
-        if (base) {
-          const origem = itens.filter((i) => i.lista === base);
-          const TAMANHO = 100;
-          for (let i = 0; i < origem.length; i += TAMANHO) {
-            const lote = origem.slice(i, i + TAMANHO).map((item) => {
-              const copia = { ...item, lista: nome };
-              delete copia.id;
-              delete copia.criado_em;
-              copia.importado_em = new Date().toISOString();
-              return copia;
-            });
-            await criar('lista_de_produtos', lote);
-            if (info) info.textContent = `copiando ${Math.min(i + TAMANHO, origem.length)}/${origem.length}…`;
-          }
-          ui.toast(`${origem.length} item(ns) copiado(s).`);
-        } else {
-          ui.toast('Sugestão vazia criada — adicione os produtos.');
+        const origem = itens.filter((i) => i.lista === base);
+        const TAMANHO = 100;
+        for (let i = 0; i < origem.length; i += TAMANHO) {
+          const lote = origem.slice(i, i + TAMANHO).map((item) => {
+            const copia = { ...item, lista: nome };
+            delete copia.id;
+            delete copia.criado_em;
+            copia.importado_em = new Date().toISOString();
+            return copia;
+          });
+          await criar('lista_de_produtos', lote);
+          if (info) info.textContent = `copiando ${Math.min(i + TAMANHO, origem.length)}/${origem.length}…`;
         }
 
+        await criar('sugestoes', { nome, status: 'rascunho', criado_por: ctx.perfil?.id || null });
+
+        ui.toast(`Sugestão criada com ${origem.length} item(ns).`);
         fechar();
         ctx.irPara(`#/sugestao/${encodeURIComponent(nome)}`);
       } catch (erro) {
@@ -249,7 +252,7 @@ async function renderIndice(raiz, ctx) {
       if (!window.confirm(`Excluir a sugestão "${nome}" e todos os seus itens?`)) return;
       try {
         await excluirOnde('lista_de_produtos', { lista: nome });
-        const cab = statusPorNome.get(nome);
+        const cab = sugestaoPorNome.get(nome);
         if (cab) await excluir('sugestoes', cab.id);
         ui.toast('Sugestão excluída.');
         ctx.recarregar();
@@ -349,12 +352,10 @@ async function renderEditor(raiz, ctx, lista) {
     <div class="cartao">
       <div class="cartao-topo">
         <h2>Pedido sugerido</h2>
-        <button type="button" class="botao-primario" id="gerar-todos">
-          Gerar pedido de todos os fornecedores
-        </button>
+        ${podeEditar ? '<button type="button" class="botao-primario" id="gerar-pedido">Gerar pedido sugerido</button>' : ''}
       </div>
-      <p class="sub">Gere o pedido por fornecedor e envie por WhatsApp ou e-mail.
-        O envio usa o contato cadastrado no fornecedor.</p>
+      <p class="sub">O pedido só é criado quando você clicar no botão. Depois de gerado,
+        pode ser enviado por WhatsApp ou e-mail usando o contato do fornecedor.</p>
       <div id="pedidos"></div>
     </div>`;
 
@@ -1078,7 +1079,7 @@ async function renderEditor(raiz, ctx, lista) {
     ].join('\n');
   }
 
-  async function registrarPedido(fornecedor, dados, status = 'gerado') {
+  async function registrarPedido(fornecedor, dados) {
     const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
     return criar('sugestoes_pedidos', {
       sugestao: lista,
@@ -1092,7 +1093,7 @@ async function renderEditor(raiz, ctx, lista) {
       total_itens: dados.itens.length,
       quantidade: dados.quantidade,
       valor_total: dados.valor,
-      status,
+      status: 'gerado',
       criado_por: ctx.perfil?.id || null,
     });
   }
@@ -1101,154 +1102,117 @@ async function renderEditor(raiz, ctx, lista) {
     const alvo = raiz.querySelector('#pedidos');
     if (!alvo) return;
 
-    const grupos = montarGrupos();
-    if (!grupos.size) {
-      alvo.innerHTML = ui.vazio('Adicione itens para gerar o pedido sugerido.');
+    const gerados = pedidosGerados.filter((p) => p.status !== 'cancelado');
+
+    if (!gerados.length) {
+      alvo.innerHTML = ui.vazio('Nenhum pedido gerado ainda.');
       return;
     }
-
-    const linhas = [...grupos.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([fornecedor, dados]) => {
-        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
-        const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
-        return `<tr>
-          <td>${ui.esc(fornecedor)}</td>
-          <td class="num">${ui.num(dados.itens.length, 0)}</td>
-          <td class="num">${ui.num(dados.quantidade, 0)}</td>
-          <td class="num">${ui.brl(dados.valor)}</td>
-          <td>${gerado
-            ? (gerado.status === 'enviado'
-              ? ui.badge('enviado', 'verde')
-              : ui.badge('gerado', 'azul'))
-            : '—'}</td>
-          <td class="acoes">
-            <button type="button" class="botao-pequeno"
-                    data-gerar="${ui.esc(fornecedor)}">Gerar</button>
-            <button type="button" class="botao-pequeno"
-                    data-whats="${ui.esc(fornecedor)}">WhatsApp</button>
-            <button type="button" class="botao-pequeno"
-                    data-email="${ui.esc(fornecedor)}">E-mail</button>
-          </td>
-        </tr>`;
-      }).join('');
 
     alvo.innerHTML = `<div class="tabela-rolagem"><table>
       <thead><tr><th>Fornecedor</th><th class="num">Itens</th>
         <th class="num">Quantidade</th><th class="num">Valor</th>
-        <th>Pedido</th><th></th></tr></thead>
-      <tbody>${linhas}</tbody>
+        <th>Status</th><th>Enviado</th><th></th></tr></thead>
+      <tbody>
+        ${gerados.map((p) => `<tr>
+          <td>${ui.esc(p.fornecedor_nome || '—')}</td>
+          <td class="num">${ui.num(p.total_itens, 0)}</td>
+          <td class="num">${ui.num(p.quantidade, 0)}</td>
+          <td class="num">${ui.brl(p.valor_total)}</td>
+          <td>${p.status === 'enviado'
+            ? ui.badge('enviado', 'verde') : ui.badge('gerado', 'azul')}</td>
+          <td>${p.enviado_em
+            ? `${ui.dataBR(p.enviado_em)} · ${ui.esc(p.enviado_canal || '')}` : '—'}</td>
+          <td class="acoes">
+            <button type="button" class="botao-pequeno"
+              data-whats="${ui.esc(p.id)}">WhatsApp</button>
+            <button type="button" class="botao-pequeno"
+              data-email="${ui.esc(p.id)}">E-mail</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
     </table></div>`;
 
-    const gruposAgora = montarGrupos();
-
-    for (const b of alvo.querySelectorAll('[data-gerar]')) {
-      b.addEventListener('click', async () => {
-        const fornecedor = b.dataset.gerar;
-        const dados = gruposAgora.get(fornecedor);
-        if (!dados) return;
-        b.disabled = true;
-        try {
-          await registrarPedido(fornecedor, dados);
-          ui.toast(`Pedido de ${fornecedor} gerado.`);
-          ctx.recarregar();
-        } catch (erro) {
-          ui.toast(erro.message, 'erro');
-          b.disabled = false;
-        }
+    async function marcarEnviado(pedidoId, canal) {
+      await atualizar('sugestoes_pedidos', pedidoId, {
+        status: 'enviado', enviado_em: new Date().toISOString(), enviado_canal: canal,
       });
+      ctx.recarregar();
     }
 
     for (const b of alvo.querySelectorAll('[data-whats]')) {
       b.addEventListener('click', async () => {
-        const fornecedor = b.dataset.whats;
-        const dados = gruposAgora.get(fornecedor);
-        if (!dados) return;
+        const pedido = gerados.find((p) => p.id === b.dataset.whats);
+        if (!pedido) return;
 
-        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+        const dados = {
+          itens: pedido.itens || [],
+          quantidade: pedido.quantidade,
+          valor: pedido.valor_total,
+        };
+        const cab = fornecedorPorNome.get((pedido.fornecedor_nome || '').toUpperCase());
+
         let telefone = (cab?.whatsapp || '').replace(/\D/g, '');
         if (!telefone) {
-          const digitado = window.prompt(
-            `WhatsApp de ${fornecedor} (com DDD):`, '');
+          const digitado = window.prompt(`WhatsApp de ${pedido.fornecedor_nome} (com DDD):`, '');
           if (digitado === null) return;
           telefone = digitado.replace(/\D/g, '');
         }
         if (!telefone) { ui.toast('Informe o WhatsApp.', 'erro'); return; }
         if (telefone.length <= 11) telefone = `55${telefone}`;
 
-        const texto = textoDoPedido(fornecedor, dados);
-        window.open(ui.linkWhatsapp(telefone, texto), '_blank');
-
-        try {
-          const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
-          if (gerado) {
-            await atualizar('sugestoes_pedidos', gerado.id, {
-              status: 'enviado', enviado_em: new Date().toISOString(),
-              enviado_canal: 'whatsapp',
-            });
-          } else {
-            const novo = await registrarPedido(fornecedor, dados, 'enviado');
-            if (novo) {
-              await atualizar('sugestoes_pedidos', novo.id, {
-                enviado_em: new Date().toISOString(), enviado_canal: 'whatsapp',
-              });
-            }
-          }
-          ctx.recarregar();
-        } catch (_) { /* envio já foi aberto */ }
+        window.open(ui.linkWhatsapp(telefone, textoDoPedido(pedido.fornecedor_nome, dados)), '_blank');
+        try { await marcarEnviado(pedido.id, 'whatsapp'); } catch (_) { /* opcional */ }
       });
     }
 
     for (const b of alvo.querySelectorAll('[data-email]')) {
       b.addEventListener('click', async () => {
-        const fornecedor = b.dataset.email;
-        const dados = gruposAgora.get(fornecedor);
-        if (!dados) return;
+        const pedido = gerados.find((p) => p.id === b.dataset.email);
+        if (!pedido) return;
 
-        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+        const dados = {
+          itens: pedido.itens || [],
+          quantidade: pedido.quantidade,
+          valor: pedido.valor_total,
+        };
+        const cab = fornecedorPorNome.get((pedido.fornecedor_nome || '').toUpperCase());
+
         let email = cab?.email || '';
         if (!email) {
-          const digitado = window.prompt(`E-mail de ${fornecedor}:`, '');
+          const digitado = window.prompt(`E-mail de ${pedido.fornecedor_nome}:`, '');
           if (digitado === null) return;
           email = digitado.trim();
         }
         if (!email) { ui.toast('Informe o e-mail.', 'erro'); return; }
 
-        const texto = textoDoPedido(fornecedor, dados);
-        window.open(ui.linkEmail(email, `Pedido sugerido — ${lista}`, texto), '_blank');
-
-        try {
-          const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
-          if (gerado) {
-            await atualizar('sugestoes_pedidos', gerado.id, {
-              status: 'enviado', enviado_em: new Date().toISOString(),
-              enviado_canal: 'email',
-            });
-          } else {
-            const novo = await registrarPedido(fornecedor, dados, 'enviado');
-            if (novo) {
-              await atualizar('sugestoes_pedidos', novo.id, {
-                enviado_em: new Date().toISOString(), enviado_canal: 'email',
-              });
-            }
-          }
-          ctx.recarregar();
-        } catch (_) { /* envio já foi aberto */ }
+        window.open(ui.linkEmail(email, `Pedido sugerido — ${lista}`,
+          textoDoPedido(pedido.fornecedor_nome, dados)), '_blank');
+        try { await marcarEnviado(pedido.id, 'email'); } catch (_) { /* opcional */ }
       });
     }
   }
 
-  raiz.querySelector('#gerar-todos')?.addEventListener('click', async () => {
+  raiz.querySelector('#gerar-pedido')?.addEventListener('click', async () => {
     const grupos = montarGrupos();
-    if (!grupos.size) return;
-    if (!window.confirm(`Gerar pedido sugerido para ${grupos.size} fornecedor(es)?`)) return;
+    if (!grupos.size) { ui.toast('A sugestão não tem itens.', 'erro'); return; }
+
+    const pendentes = [...grupos.entries()]
+      .filter(([fornecedor]) => !pedidosGerados.some((p) => p.fornecedor_nome === fornecedor));
+
+    if (!pendentes.length) {
+      ui.toast('Todos os fornecedores já têm pedido gerado.');
+      return;
+    }
+
+    if (!window.confirm(
+      `Gerar pedido sugerido para ${pendentes.length} fornecedor(es)?`)) return;
 
     try {
-      for (const [fornecedor, dados] of grupos.entries()) {
-        if (pedidosGerados.some((p) => p.fornecedor_nome === fornecedor)) continue;
+      for (const [fornecedor, dados] of pendentes) {
         await registrarPedido(fornecedor, dados);
       }
-      ui.toast('Pedidos gerados.');
+      ui.toast(`${pendentes.length} pedido(s) gerado(s).`);
       ctx.recarregar();
     } catch (erro) { ui.toast(erro.message, 'erro'); }
   });
