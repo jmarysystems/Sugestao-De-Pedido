@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122f';
-import * as ui from '../ui.js?v=20261122f';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122g';
+import * as ui from '../ui.js?v=20261122g';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -337,10 +337,14 @@ async function renderEditor(raiz, ctx, lista) {
   const podeEditar = ctx.pode('sugestao', 'editar') || ctx.pode('sugestao', 'cadastrar');
   const podeExcluir = ctx.pode('sugestao', 'excluir');
 
-  const [itens, produtos, cabecalhos] = await Promise.all([
+  const [itens, produtos, cabecalhos, fornecedores, pedidosGerados] = await Promise.all([
     listar('lista_de_produtos', { ordem: 'ordem' }),
     listar('produtos', { select: 'id, sku, descricao, unidade', ordem: 'sku' }),
     listar('sugestoes', { ordem: 'nome' }),
+    listar('fornecedores', { select: 'id, razao_social, email, whatsapp, contato_nome' }),
+    listar('sugestoes_pedidos', {
+      select: '*', eq: { sugestao: lista }, ordem: 'criado_em', asc: false,
+    }),
   ]);
 
   const cabecalho = cabecalhos.find((c) => c.nome === lista) || null;
@@ -401,6 +405,18 @@ async function renderEditor(raiz, ctx, lista) {
     <div class="cartao">
       <h2>Resumo por fornecedor</h2>
       <div id="resumo-fornecedor"></div>
+    </div>
+
+    <div class="cartao">
+      <div class="cartao-topo">
+        <h2>Pedido sugerido</h2>
+        <button type="button" class="botao-primario" id="gerar-todos">
+          Gerar pedido de todos os fornecedores
+        </button>
+      </div>
+      <p class="sub">Gere o pedido por fornecedor e envie por WhatsApp ou e-mail.
+        O envio usa o contato cadastrado no fornecedor.</p>
+      <div id="pedidos"></div>
     </div>`;
 
   const tabela = raiz.querySelector('#tabela');
@@ -817,5 +833,214 @@ async function renderEditor(raiz, ctx, lista) {
     });
   });
 
+  // ------------------------------------------------------- pedido sugerido
+  function montarGrupos() {
+    const grupos = new Map();
+    for (const item of daLista()) {
+      const fornecedor = item.fornecedor_nome || 'Sem fornecedor';
+      const atual = grupos.get(fornecedor) || { itens: [], quantidade: 0, valor: 0 };
+      atual.itens.push(item);
+      atual.quantidade += Number(item.quantidade) || 0;
+      atual.valor += (Number(item.quantidade) || 0) * (Number(item.valor_unitario) || 0);
+      grupos.set(fornecedor, atual);
+    }
+    return grupos;
+  }
+
+  const fornecedorPorNome = new Map(
+    fornecedores.map((f) => [(f.razao_social || '').toUpperCase(), f]));
+
+  function textoDoPedido(fornecedor, dados) {
+    const linhas = dados.itens.map((i, n) => {
+      const qtd = Number(i.quantidade) || 0;
+      return `${n + 1}. ${i.sku || ''} - ${i.descricao || ''} — ${ui.num(qtd, 0)} ${i.unidade || ''}`;
+    });
+    return [
+      `*Pedido sugerido — ${lista}*`,
+      `Fornecedor: ${fornecedor}`,
+      `Data: ${new Date().toLocaleDateString('pt-BR')}`,
+      '',
+      ...linhas,
+      '',
+      `Total: ${ui.num(dados.quantidade, 0)} unidade(s) · ${ui.brl(dados.valor)}`,
+    ].join('\n');
+  }
+
+  async function registrarPedido(fornecedor, dados, status = 'gerado') {
+    const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+    return criar('sugestoes_pedidos', {
+      sugestao: lista,
+      fornecedor_nome: fornecedor,
+      fornecedor_id: cab?.id || null,
+      itens: dados.itens.map((i) => ({
+        sku: i.sku, descricao: i.descricao, unidade: i.unidade,
+        quantidade: Number(i.quantidade) || 0,
+        valor_unitario: Number(i.valor_unitario) || 0,
+      })),
+      total_itens: dados.itens.length,
+      quantidade: dados.quantidade,
+      valor_total: dados.valor,
+      status,
+      criado_por: ctx.perfil?.id || null,
+    });
+  }
+
+  function desenharPedidos() {
+    const alvo = raiz.querySelector('#pedidos');
+    if (!alvo) return;
+
+    const grupos = montarGrupos();
+    if (!grupos.size) {
+      alvo.innerHTML = ui.vazio('Adicione itens para gerar o pedido sugerido.');
+      return;
+    }
+
+    const linhas = [...grupos.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([fornecedor, dados]) => {
+        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+        const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
+        return `<tr>
+          <td>${ui.esc(fornecedor)}</td>
+          <td class="num">${ui.num(dados.itens.length, 0)}</td>
+          <td class="num">${ui.num(dados.quantidade, 0)}</td>
+          <td class="num">${ui.brl(dados.valor)}</td>
+          <td>${gerado
+            ? (gerado.status === 'enviado'
+              ? ui.badge('enviado', 'verde')
+              : ui.badge('gerado', 'azul'))
+            : '—'}</td>
+          <td class="acoes">
+            <button type="button" class="botao-pequeno"
+                    data-gerar="${ui.esc(fornecedor)}">Gerar</button>
+            <button type="button" class="botao-pequeno"
+                    data-whats="${ui.esc(fornecedor)}">WhatsApp</button>
+            <button type="button" class="botao-pequeno"
+                    data-email="${ui.esc(fornecedor)}">E-mail</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+    alvo.innerHTML = `<div class="tabela-rolagem"><table>
+      <thead><tr><th>Fornecedor</th><th class="num">Itens</th>
+        <th class="num">Quantidade</th><th class="num">Valor</th>
+        <th>Pedido</th><th></th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>`;
+
+    const gruposAgora = montarGrupos();
+
+    for (const b of alvo.querySelectorAll('[data-gerar]')) {
+      b.addEventListener('click', async () => {
+        const fornecedor = b.dataset.gerar;
+        const dados = gruposAgora.get(fornecedor);
+        if (!dados) return;
+        b.disabled = true;
+        try {
+          await registrarPedido(fornecedor, dados);
+          ui.toast(`Pedido de ${fornecedor} gerado.`);
+          ctx.recarregar();
+        } catch (erro) {
+          ui.toast(erro.message, 'erro');
+          b.disabled = false;
+        }
+      });
+    }
+
+    for (const b of alvo.querySelectorAll('[data-whats]')) {
+      b.addEventListener('click', async () => {
+        const fornecedor = b.dataset.whats;
+        const dados = gruposAgora.get(fornecedor);
+        if (!dados) return;
+
+        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+        let telefone = (cab?.whatsapp || '').replace(/\D/g, '');
+        if (!telefone) {
+          const digitado = window.prompt(
+            `WhatsApp de ${fornecedor} (com DDD):`, '');
+          if (digitado === null) return;
+          telefone = digitado.replace(/\D/g, '');
+        }
+        if (!telefone) { ui.toast('Informe o WhatsApp.', 'erro'); return; }
+        if (telefone.length <= 11) telefone = `55${telefone}`;
+
+        const texto = textoDoPedido(fornecedor, dados);
+        window.open(ui.linkWhatsapp(telefone, texto), '_blank');
+
+        try {
+          const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
+          if (gerado) {
+            await atualizar('sugestoes_pedidos', gerado.id, {
+              status: 'enviado', enviado_em: new Date().toISOString(),
+              enviado_canal: 'whatsapp',
+            });
+          } else {
+            const novo = await registrarPedido(fornecedor, dados, 'enviado');
+            if (novo) {
+              await atualizar('sugestoes_pedidos', novo.id, {
+                enviado_em: new Date().toISOString(), enviado_canal: 'whatsapp',
+              });
+            }
+          }
+          ctx.recarregar();
+        } catch (_) { /* envio já foi aberto */ }
+      });
+    }
+
+    for (const b of alvo.querySelectorAll('[data-email]')) {
+      b.addEventListener('click', async () => {
+        const fornecedor = b.dataset.email;
+        const dados = gruposAgora.get(fornecedor);
+        if (!dados) return;
+
+        const cab = fornecedorPorNome.get(fornecedor.toUpperCase());
+        let email = cab?.email || '';
+        if (!email) {
+          const digitado = window.prompt(`E-mail de ${fornecedor}:`, '');
+          if (digitado === null) return;
+          email = digitado.trim();
+        }
+        if (!email) { ui.toast('Informe o e-mail.', 'erro'); return; }
+
+        const texto = textoDoPedido(fornecedor, dados);
+        window.open(ui.linkEmail(email, `Pedido sugerido — ${lista}`, texto), '_blank');
+
+        try {
+          const gerado = pedidosGerados.find((p) => p.fornecedor_nome === fornecedor);
+          if (gerado) {
+            await atualizar('sugestoes_pedidos', gerado.id, {
+              status: 'enviado', enviado_em: new Date().toISOString(),
+              enviado_canal: 'email',
+            });
+          } else {
+            const novo = await registrarPedido(fornecedor, dados, 'enviado');
+            if (novo) {
+              await atualizar('sugestoes_pedidos', novo.id, {
+                enviado_em: new Date().toISOString(), enviado_canal: 'email',
+              });
+            }
+          }
+          ctx.recarregar();
+        } catch (_) { /* envio já foi aberto */ }
+      });
+    }
+  }
+
+  raiz.querySelector('#gerar-todos')?.addEventListener('click', async () => {
+    const grupos = montarGrupos();
+    if (!grupos.size) return;
+    if (!window.confirm(`Gerar pedido sugerido para ${grupos.size} fornecedor(es)?`)) return;
+
+    try {
+      for (const [fornecedor, dados] of grupos.entries()) {
+        if (pedidosGerados.some((p) => p.fornecedor_nome === fornecedor)) continue;
+        await registrarPedido(fornecedor, dados);
+      }
+      ui.toast('Pedidos gerados.');
+      ctx.recarregar();
+    } catch (erro) { ui.toast(erro.message, 'erro'); }
+  });
+
   desenhar();
+  desenharPedidos();
 }
