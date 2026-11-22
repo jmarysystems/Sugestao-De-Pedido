@@ -1,6 +1,6 @@
 // Pedidos Sugeridos: pedidos gerados a partir das sugestões.
-import { listar, atualizar, excluir } from '../api.js?v=20261122s';
-import * as ui from '../ui.js?v=20261122s';
+import { listar, atualizar, excluir } from '../api.js?v=20261122t';
+import * as ui from '../ui.js?v=20261122t';
 
 const STATUS_PEDIDO = {
   gerado: { rotulo: 'Gerado', cor: 'azul' },
@@ -67,6 +67,8 @@ export async function render(raiz, ctx) {
               <button type="button" class="botao-pequeno"
                 data-itens="${ui.esc(p.id)}">Itens</button>
               <button type="button" class="botao-pequeno"
+                data-imprimir="${ui.esc(p.id)}">Imprimir</button>
+              <button type="button" class="botao-pequeno"
                 data-editar="${ui.esc(p.id)}">Editar</button>
               <button type="button" class="botao-pequeno botao-perigo"
                 data-excluir="${ui.esc(p.id)}">Excluir</button>
@@ -108,6 +110,89 @@ export async function render(raiz, ctx) {
               <th class="num">${ui.brl(pedido.valor_total)}</th></tr></tfoot>
           </table></div>` : ui.vazio('Pedido sem itens registrados.'),
         });
+      });
+    }
+
+    // ------------------------------------------------------- imprimir
+    function imprimirPedido(pedido) {
+      document.querySelectorAll('.area-impressao').forEach((n) => n.remove());
+
+      const itens = Array.isArray(pedido.itens) ? pedido.itens : [];
+      const total = itens.reduce(
+        (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
+
+      const el = document.createElement('div');
+      el.className = 'area-impressao';
+      el.innerHTML = `
+        <div class="print-topo">
+          <div>
+            <h1>PEDIDO SUGERIDO</h1>
+            <div class="print-linha">Fornecedor: <strong>${ui.esc(pedido.fornecedor_nome || '—')}</strong></div>
+            <div class="print-linha">Sugestão de origem: ${ui.esc(pedido.sugestao || '—')}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="print-linha">Data: <strong>${
+              ui.dataBR(pedido.criado_em || new Date().toISOString())}</strong></div>
+            <div class="print-linha">Status: <strong>${
+              ui.esc((STATUS_PEDIDO[pedido.status] || STATUS_PEDIDO.gerado).rotulo)}</strong></div>
+            <div class="print-linha">Itens: <strong>${itens.length}</strong></div>
+          </div>
+        </div>
+
+        <h2>Produtos</h2>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:14%">SKU</th>
+              <th>Descrição</th>
+              <th style="width:10%">Un.</th>
+              <th class="num" style="width:10%">Qtd</th>
+              <th class="num" style="width:14%">Valor un.</th>
+              <th class="num" style="width:14%">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itens.map((i) => `<tr>
+              <td>${ui.esc(i.sku || '—')}</td>
+              <td>${ui.esc(i.descricao || '')}</td>
+              <td>${ui.esc(i.unidade || '')}</td>
+              <td class="num">${ui.num(i.quantidade, 0)}</td>
+              <td class="num">${ui.brl(i.valor_unitario)}</td>
+              <td class="num">${ui.brl((Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0))}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="5" class="num">TOTAL DO PEDIDO</th>
+              <th class="num">${ui.brl(total)}</th>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="print-rodape">
+          <div>Recebido por: _______________________________________</div>
+          <div>Data: ____ / ____ / ________</div>
+        </div>
+        <div class="print-observacao">Documento gerado pelo sistema Sugestão de Pedido em ${
+          ui.dataHoraBR(new Date().toISOString())}.</div>
+      `;
+
+      document.body.appendChild(el);
+
+      const limpar = () => {
+        el.remove();
+        window.removeEventListener('afterprint', limpar);
+      };
+      window.addEventListener('afterprint', limpar);
+      setTimeout(limpar, 30000);
+
+      window.print();
+    }
+
+    for (const b of alvo.querySelectorAll('[data-imprimir]')) {
+      b.addEventListener('click', () => {
+        const pedido = pedidos.find((p) => p.id === b.dataset.imprimir);
+        if (pedido) imprimirPedido(pedido);
       });
     }
 

@@ -1,5 +1,5 @@
 // Leitura de planilha e importação de listas (usada nas telas de Listas e Sugestão).
-import { listar, criar } from './api.js?v=20261122s';
+import { listar, criar } from './api.js?v=20261122t';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -284,7 +284,7 @@ export async function importarLista({
   }
 
   if (limpar) {
-    const { excluirOnde } = await import('./api.js?v=20261122s');
+    const { excluirOnde } = await import('./api.js?v=20261122t');
     await excluirOnde('lista_de_produtos', { lista });
   }
 
