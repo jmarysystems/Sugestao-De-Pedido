@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122e';
-import * as ui from '../ui.js?v=20261122e';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122f';
+import * as ui from '../ui.js?v=20261122f';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -32,7 +32,6 @@ const MODOS = [
 const CAMPOS_POSICAO = ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
   'paredao_entrada', 'deposito'];
 
-// Estoque de segurança = soma das posições na loja
 const estoqueSeguranca = (item) => CAMPOS_POSICAO
   .reduce((s, k) => s + (Number(item[k]) || 0), 0);
 
@@ -99,8 +98,6 @@ function mapearCabecalho(linhaCabecalho) {
   return mapa;
 }
 
-const body_focus = (el) => { try { el.focus(); el.select(); } catch (_) { /* opcional */ } };
-
 // --------------------------------------------------------------------- índice
 export async function render(raiz, ctx) {
   if (ctx.id) return renderEditor(raiz, ctx, ctx.id);
@@ -120,6 +117,7 @@ async function renderIndice(raiz, ctx) {
 
   const statusPorNome = new Map(cabecalhos.map((c) => [c.nome, c]));
   const grupos = new Map();
+
   for (const item of itens) {
     const atual = grupos.get(item.lista) || {
       itens: 0, quantidade: 0, valor: 0, sugerida: 0, criado: null, lojas: new Set(),
@@ -203,7 +201,6 @@ async function renderIndice(raiz, ctx) {
       const nome = corpo.querySelector('#nome').value.trim();
       const info = corpo.querySelector('#info');
       if (!nome) { ui.toast('Informe o nome da sugestão.', 'erro'); return; }
-
       if (grupos.has(nome)) {
         ui.toast('Já existe uma sugestão com esse nome.', 'erro');
         return;
@@ -232,7 +229,7 @@ async function renderIndice(raiz, ctx) {
           }
           ui.toast(`${origem.length} item(ns) copiado(s).`);
         } else {
-          ui.toast('Sugestão vazia criada — busque os produtos para adicionar.');
+          ui.toast('Sugestão vazia criada — adicione os produtos.');
         }
 
         fechar();
@@ -270,7 +267,6 @@ async function renderIndice(raiz, ctx) {
           <div class="sub" id="info" style="margin-top:8px"></div>`,
       });
 
-      body_focus(corpo.querySelector('#nome'));
       corpo.querySelector('#cancelar').addEventListener('click', fechar);
 
       corpo.querySelector('#salvar').addEventListener('click', async () => {
@@ -290,22 +286,17 @@ async function renderIndice(raiz, ctx) {
         botao.textContent = 'Salvando…';
 
         try {
-          const afetados = itens.filter((i) => i.lista === atual);
-          const TAMANHO = 100;
-          for (let i = 0; i < afetados.length; i += TAMANHO) {
-            const lote = afetados.slice(i, i + TAMANHO);
-            for (const item of lote) {
+          if (novo !== atual) {
+            const afetados = itens.filter((i) => i.lista === atual);
+            for (const item of afetados) {
               await atualizar('lista_de_produtos', item.id, { lista: novo });
             }
-            if (info) info.textContent = `renomeando ${Math.min(i + TAMANHO, afetados.length)}/${afetados.length}…`;
+            if (info) info.textContent = `${afetados.length} item(ns) renomeado(s).`;
           }
 
-          // atualiza o cabeçalho (nome e/ou status)
           if (cab) {
             await atualizar('sugestoes', cab.id, {
-              nome: novo,
-              status: novoStatus,
-              atualizado_em: new Date().toISOString(),
+              nome: novo, status: novoStatus, atualizado_em: new Date().toISOString(),
             });
           } else {
             await criar('sugestoes', { nome: novo, status: novoStatus });
@@ -346,33 +337,52 @@ async function renderEditor(raiz, ctx, lista) {
   const podeEditar = ctx.pode('sugestao', 'editar') || ctx.pode('sugestao', 'cadastrar');
   const podeExcluir = ctx.pode('sugestao', 'excluir');
 
-  const [itens, produtos] = await Promise.all([
+  const [itens, produtos, cabecalhos] = await Promise.all([
     listar('lista_de_produtos', { ordem: 'ordem' }),
     listar('produtos', { select: 'id, sku, descricao, unidade', ordem: 'sku' }),
+    listar('sugestoes', { ordem: 'nome' }),
   ]);
 
+  const cabecalho = cabecalhos.find((c) => c.nome === lista) || null;
+  const statusAtual = STATUS[cabecalho?.status || 'rascunho'] || STATUS.rascunho;
   const daLista = () => itens.filter((i) => i.lista === lista);
+
+  const itensAtuais = daLista();
+  const totalSugerido = itensAtuais.reduce((s, i) => s + sugeridaDe(i), 0);
+  const totalPedir = itensAtuais.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+  const totalValor = itensAtuais.reduce(
+    (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
 
   raiz.innerHTML = `
     <div class="cartao">
       <div class="cartao-topo">
-        <h2>${ui.esc(lista)}</h2>
+        <div class="linha-acoes" style="align-items:flex-start;gap:12px">
+          <div>
+            <h2 style="display:flex;align-items:center;gap:10px;margin:0">
+              ${ui.esc(lista)} ${ui.badge(statusAtual.rotulo, statusAtual.cor)}
+            </h2>
+            <p class="sub" style="margin:6px 0 0">
+              criada em ${cabecalho?.criado_em ? ui.dataBR(cabecalho.criado_em) : '—'} ·
+              ${itensAtuais.length} item(ns) ·
+              sugerido ${ui.num(totalSugerido, 0)} · a pedir ${ui.num(totalPedir, 0)} ·
+              ${ui.brl(totalValor)}
+            </p>
+          </div>
+        </div>
         <div class="linha-acoes">
           <a class="botao-pequeno" href="#/sugestao">← Voltar</a>
-          ${podeEditar ? '<button type="button" class="botao-pequeno" id="importar">Importar lista de arquivo</button>' : ''}
+          ${podeEditar ? '<button type="button" class="botao-pequeno" id="adicionar-item">Adicionar item</button>' : ''}
+          ${podeEditar ? '<button type="button" class="botao-pequeno" id="importar">Importar lista</button>' : ''}
+          ${podeEditar ? '<button type="button" class="botao-primario" id="finalizar">Finalizar</button>' : ''}
+          ${podeExcluir ? '<button type="button" class="botao-pequeno botao-perigo" id="excluir-sugestao">Excluir</button>' : ''}
         </div>
       </div>
-      <p class="sub">Procure os produtos para adicionar, ajuste a venda média e escolha o
-        cálculo do estoque a manter. A quantidade sugerida aparece na tabela.</p>
-
-      <label class="campo" style="max-width:520px"><span>Adicionar produto (SKU ou descrição)</span>
-        <input type="search" id="busca-produto" placeholder="digite para procurar"></label>
-      <div id="resultados" class="sub" style="margin-top:8px"></div>
     </div>
 
     <div class="cartao">
       <div class="cartao-topo">
-        <h2>Itens <span id="resumo" class="sub"></span></h2>
+        <h2>Itens (${itensAtuais.length})</h2>
+        <span class="sub" id="resumo"></span>
       </div>
 
       <div class="linha-acoes" style="margin-bottom:12px;flex-wrap:wrap">
@@ -386,25 +396,26 @@ async function renderEditor(raiz, ctx, lista) {
       </div>
 
       <div id="tabela"></div>
+    </div>
+
+    <div class="cartao">
+      <h2>Resumo por fornecedor</h2>
+      <div id="resumo-fornecedor"></div>
     </div>`;
 
-  const busca = raiz.querySelector('#busca-produto');
-  const resultados = raiz.querySelector('#resultados');
   const tabela = raiz.querySelector('#tabela');
   const resumo = raiz.querySelector('#resumo');
 
   function desenhar() {
-    const lista_itens = daLista().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-    const totalQtd = lista_itens.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
-    const totalValor = lista_itens.reduce(
+    const listaItens = daLista().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    const tQtd = listaItens.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+    const tValor = listaItens.reduce(
       (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
-    const totalSug = lista_itens.reduce((s, i) => s + sugeridaDe(i), 0);
+    const tSug = listaItens.reduce((s, i) => s + sugeridaDe(i), 0);
 
-    resumo.textContent = lista_itens.length
-      ? `${lista_itens.length} item(ns) · sugerido ${ui.num(totalSug, 0)} · a pedir ${ui.num(totalQtd, 0)} · ${ui.brl(totalValor)}`
-      : '';
+    resumo.textContent = `sugerido ${ui.num(tSug, 0)} · a pedir ${ui.num(tQtd, 0)} · ${ui.brl(tValor)}`;
 
-    tabela.innerHTML = lista_itens.length ? `
+    tabela.innerHTML = listaItens.length ? `
       <div class="tabela-rolagem"><table>
         <thead><tr>
           <th>Loja</th><th>SKU</th><th>Descrição</th><th>Emb.</th>
@@ -413,7 +424,7 @@ async function renderEditor(raiz, ctx, lista) {
           <th class="num">Qtd sugerida</th><th class="num">Qtd a pedir</th><th></th>
         </tr></thead>
         <tbody>
-          ${lista_itens.map((i) => {
+          ${listaItens.map((i) => {
             const manter = calcularEstoqueManter(i);
             return `<tr>
             <td>${ui.esc(i.loja || '—')}</td>
@@ -446,7 +457,37 @@ async function renderEditor(raiz, ctx, lista) {
           </tr>`;
           }).join('')}
         </tbody>
-      </table></div>` : ui.vazio('Nenhum item nesta sugestão.');
+      </table></div>` : ui.vazio('Nenhum item nesta sugestão. Use "Adicionar item" ou "Importar lista".');
+
+    // ------------------------------------------------ resumo por fornecedor
+    const grupos = new Map();
+    for (const item of listaItens) {
+      const fornecedor = item.fornecedor_nome || 'Sem fornecedor';
+      const atual = grupos.get(fornecedor) || { itens: 0, quantidade: 0, valor: 0, prazo: 0 };
+      atual.itens += 1;
+      atual.quantidade += Number(item.quantidade) || 0;
+      atual.valor += (Number(item.quantidade) || 0) * (Number(item.valor_unitario) || 0);
+      atual.prazo = Math.max(atual.prazo, Number(item.prazo_entrega) || 0);
+      grupos.set(fornecedor, atual);
+    }
+
+    const alvoResumo = raiz.querySelector('#resumo-fornecedor');
+    alvoResumo.innerHTML = grupos.size ? `<div class="tabela-rolagem"><table>
+      <thead><tr><th>Fornecedor</th><th class="num">Itens</th>
+        <th class="num">Quantidade</th><th class="num">Prazo</th><th class="num">Valor</th></tr></thead>
+      <tbody>
+        ${[...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([nome, d]) => `<tr>
+          <td>${ui.esc(nome)}</td>
+          <td class="num">${ui.num(d.itens, 0)}</td>
+          <td class="num">${ui.num(d.quantidade, 0)}</td>
+          <td class="num">${d.prazo ? `${d.prazo} dia(s)` : '—'}</td>
+          <td class="num">${ui.brl(d.valor)}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr><th>Total</th><th class="num">${ui.num(listaItens.length, 0)}</th>
+        <th class="num">${ui.num(tQtd, 0)}</th><th></th>
+        <th class="num">${ui.brl(tValor)}</th></tr></tfoot>
+    </table></div>` : ui.vazio('Sem itens para resumir.');
 
     async function salvarCalculo(item) {
       item.estoque_seguranca = estoqueSeguranca(item);
@@ -503,64 +544,105 @@ async function renderEditor(raiz, ctx, lista) {
           const idx = itens.findIndex((i) => i.id === b.dataset.remover);
           if (idx >= 0) itens.splice(idx, 1);
           ui.toast('Item removido.');
-          desenhar();
+          ctx.recarregar();
         } catch (erro) { ui.toast(erro.message, 'erro'); }
       });
     }
   }
 
-  // ------------------------------------------------------- busca produto
-  function desenharResultados(termo) {
-    const t = termo.trim().toLowerCase();
-    if (t.length < 2) { resultados.innerHTML = ''; return; }
+  // --------------------------------------------------------- adicionar item
+  raiz.querySelector('#adicionar-item')?.addEventListener('click', () => {
+    const { fechar, corpo } = ui.modal({
+      titulo: 'Adicionar item',
+      largura: '760px',
+      corpo: `
+        <label class="campo"><span>Produto (SKU ou descrição)</span>
+          <input type="search" id="busca" placeholder="digite para procurar"></label>
+        <div id="achados" class="sub" style="margin-top:8px"></div>`,
+    });
 
-    const achados = produtos
-      .filter((p) => `${p.sku} ${p.descricao}`.toLowerCase().includes(t))
-      .slice(0, 12);
+    const busca = corpo.querySelector('#busca');
+    const achados = corpo.querySelector('#achados');
 
-    resultados.innerHTML = achados.length
-      ? `<div class="tabela-rolagem"><table>
-          <thead><tr><th>SKU</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th></th></tr></thead>
-          <tbody>
-            ${achados.map((p) => `<tr>
-              <td class="mono">${ui.esc(p.sku)}</td>
-              <td>${ui.esc(p.descricao)}</td>
-              <td>${ui.esc(p.unidade || '')}</td>
-              <td class="num"><input type="number" step="0.001" value="1"
-                     id="qtd-${ui.esc(p.id)}" style="width:90px;text-align:right"></td>
-              <td><button type="button" class="botao-pequeno"
-                    data-add="${ui.esc(p.id)}">Adicionar</button></td>
-            </tr>`).join('')}
-          </tbody></table></div>`
-      : '<p class="sub">Nenhum produto encontrado.</p>';
+    function procurar(termo) {
+      const t = termo.trim().toLowerCase();
+      if (t.length < 2) { achados.innerHTML = ''; return; }
 
-    for (const b of resultados.querySelectorAll('[data-add]')) {
-      b.addEventListener('click', async () => {
-        const produto = produtos.find((p) => p.id === b.dataset.add);
-        const qtd = Number(resultados.querySelector(`#qtd-${b.dataset.add}`)?.value) || 1;
-        if (!podeEditar) { ui.toast('Sem permissão para alterar a sugestão.', 'erro'); return; }
-        if (daLista().some((i) => i.produto_id === produto.id)) {
-          ui.toast('Este produto já está na sugestão.', 'erro');
-          return;
-        }
-        try {
-          const novo = await criar('lista_de_produtos', {
-            lista, sku: produto.sku, descricao: produto.descricao,
-            unidade: produto.unidade || 'UN', quantidade: qtd,
-            produto_id: produto.id, ordem: daLista().length + 1,
-            modo_estoque: 'es_dias', estoque_seguranca: 0,
-          });
-          itens.push(novo);
-          ui.toast('Produto adicionado.');
-          busca.value = '';
-          resultados.innerHTML = '';
-          desenhar();
-        } catch (erro) { ui.toast(erro.message, 'erro'); }
-      });
+      const listaAchados = produtos
+        .filter((p) => `${p.sku} ${p.descricao}`.toLowerCase().includes(t))
+        .slice(0, 12);
+
+      achados.innerHTML = listaAchados.length
+        ? `<div class="tabela-rolagem"><table>
+            <thead><tr><th>SKU</th><th>Descrição</th><th>Un.</th>
+              <th class="num">Qtd</th><th></th></tr></thead>
+            <tbody>
+              ${listaAchados.map((p) => `<tr>
+                <td class="mono">${ui.esc(p.sku)}</td>
+                <td>${ui.esc(p.descricao)}</td>
+                <td>${ui.esc(p.unidade || '')}</td>
+                <td class="num"><input type="number" step="0.001" value="1"
+                       id="qtd-${ui.esc(p.id)}" style="width:90px;text-align:right"></td>
+                <td><button type="button" class="botao-pequeno"
+                      data-add="${ui.esc(p.id)}">Adicionar</button></td>
+              </tr>`).join('')}
+            </tbody></table></div>`
+        : '<p class="sub">Nenhum produto encontrado.</p>';
+
+      for (const b of achados.querySelectorAll('[data-add]')) {
+        b.addEventListener('click', async () => {
+          const produto = produtos.find((p) => p.id === b.dataset.add);
+          const qtd = Number(achados.querySelector(`#qtd-${b.dataset.add}`)?.value) || 1;
+          if (daLista().some((i) => i.produto_id === produto.id)) {
+            ui.toast('Este produto já está na sugestão.', 'erro');
+            return;
+          }
+          try {
+            const novo = await criar('lista_de_produtos', {
+              lista, sku: produto.sku, descricao: produto.descricao,
+              unidade: produto.unidade || 'UN', quantidade: qtd,
+              produto_id: produto.id, ordem: daLista().length + 1,
+              modo_estoque: 'es_dias', estoque_seguranca: 0,
+            });
+            itens.push(novo);
+            ui.toast('Produto adicionado.');
+            fechar();
+            ctx.recarregar();
+          } catch (erro) { ui.toast(erro.message, 'erro'); }
+        });
+      }
     }
-  }
 
-  busca.addEventListener('input', () => desenharResultados(busca.value));
+    busca.addEventListener('input', () => procurar(busca.value));
+    busca.focus();
+  });
+
+  // ------------------------------------------------------------- finalizar
+  raiz.querySelector('#finalizar')?.addEventListener('click', async () => {
+    if (!window.confirm('Finalizar a sugestão e marcá-la como "Enviada"?')) return;
+    try {
+      if (cabecalho) {
+        await atualizar('sugestoes', cabecalho.id,
+          { status: 'enviada', atualizado_em: new Date().toISOString() });
+      } else {
+        await criar('sugestoes', { nome: lista, status: 'enviada' });
+      }
+      ui.toast('Sugestão finalizada (Enviada).');
+      ctx.recarregar();
+    } catch (erro) { ui.toast(erro.message, 'erro'); }
+  });
+
+  // --------------------------------------------------------------- excluir
+  raiz.querySelector('#excluir-sugestao')?.addEventListener('click', async () => {
+    if (!window.confirm(`Excluir a sugestão "${lista}" e todos os seus itens?`)) return;
+    try {
+      await excluirOnde('lista_de_produtos', { lista });
+      if (cabecalho) await excluir('sugestoes', cabecalho.id);
+      ui.toast('Sugestão excluída.');
+      ctx.irPara('#/sugestao');
+      ctx.recarregar();
+    } catch (erro) { ui.toast(erro.message, 'erro'); }
+  });
 
   // ------------------------------------------------------- ações em massa
   raiz.querySelector('#aplicar-modo')?.addEventListener('click', async () => {
@@ -585,7 +667,7 @@ async function renderEditor(raiz, ctx, lista) {
       }
       if (status) status.textContent = 'cálculo aplicado';
       ui.toast('Cálculo aplicado a todas as linhas.');
-      desenhar();
+      ctx.recarregar();
     } catch (erro) {
       ui.toast(erro.message, 'erro');
       if (status) status.textContent = '';
@@ -609,7 +691,7 @@ async function renderEditor(raiz, ctx, lista) {
         });
       }
       ui.toast('Quantidade sugerida aplicada.');
-      desenhar();
+      ctx.recarregar();
     } catch (erro) { ui.toast(erro.message, 'erro'); }
   });
 
@@ -712,18 +794,16 @@ async function renderEditor(raiz, ctx, lista) {
 
         if (limpar) {
           await excluirOnde('lista_de_produtos', { lista });
-          for (let k = itens.length - 1; k >= 0; k -= 1) {
-            if (itens[k].lista === lista) itens.splice(k, 1);
-          }
         }
 
         const TAMANHO = 100;
         for (let i = 0; i < registros.length; i += TAMANHO) {
           const lote = registros.slice(i, i + TAMANHO);
-          const criados = await criar('lista_de_produtos', lote);
-          for (const c of (Array.isArray(criados) ? criados : [])) itens.push(c);
+          await criar('lista_de_produtos', lote);
           botao.textContent = `Gravando ${Math.min(i + TAMANHO, registros.length)}/${registros.length}…`;
         }
+
+        if (!cabecalho) await criar('sugestoes', { nome: lista, status: 'rascunho' });
 
         ui.toast(`${registros.length} item(ns) importado(s).`);
         fechar();
