@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122r';
-import * as ui from '../ui.js?v=20261122r';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122s';
+import * as ui from '../ui.js?v=20261122s';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -306,6 +306,7 @@ async function renderEditor(raiz, ctx, lista) {
         </div>
         <div class="linha-acoes">
           <a class="botao-pequeno" href="#/sugestao">← Voltar</a>
+          <button type="button" class="botao-pequeno" id="imprimir">Imprimir</button>
           ${podeEditar ? '<button type="button" class="botao-pequeno" id="editar-sugestao">Editar</button>' : ''}
           ${podeEditar ? '<button type="button" class="botao-pequeno" id="adicionar-item">Adicionar item</button>' : ''}
           ${podeEditar ? '<button type="button" class="botao-pequeno" id="importar">Importar lista</button>' : ''}
@@ -1216,6 +1217,93 @@ async function renderEditor(raiz, ctx, lista) {
       ctx.recarregar();
     } catch (erro) { ui.toast(erro.message, 'erro'); }
   });
+
+  // ------------------------------------------------------------- imprimir
+  function imprimirSugestao() {
+    document.querySelectorAll('.area-impressao').forEach((n) => n.remove());
+
+    const listaItens = daLista().sort((a, b) => (a.loja || '').localeCompare(b.loja || '')
+      || (a.fornecedor_nome || '').localeCompare(b.fornecedor_nome || '')
+      || (a.descricao || '').localeCompare(b.descricao || ''));
+
+    const tQtd = listaItens.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+    const tValor = listaItens.reduce(
+      (s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
+
+    const el = document.createElement('div');
+    el.className = 'area-impressao';
+    el.innerHTML = `
+      <div class="print-topo">
+        <div>
+          <h1>SUGESTÃO DE PEDIDO</h1>
+          <div class="print-linha"><strong>${ui.esc(lista)}</strong></div>
+          <div class="print-linha">Emitida em: <strong>${ui.dataBR(new Date().toISOString())}</strong></div>
+        </div>
+        <div style="text-align:right">
+          <div class="print-linha">Status: <strong>${ui.esc(statusAtual.rotulo)}</strong></div>
+          <div class="print-linha">Itens: <strong>${listaItens.length}</strong></div>
+          <div class="print-linha">Quantidade: <strong>${ui.num(tQtd, 0)}</strong></div>
+          <div class="print-linha">Valor total: <strong>${ui.brl(tValor)}</strong></div>
+        </div>
+      </div>
+
+      <h2>Produtos</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:14%">Fornecedor</th>
+            <th style="width:9%">Loja</th>
+            <th style="width:8%">SKU</th>
+            <th>Descrição</th>
+            <th style="width:9%">Emb.</th>
+            <th class="num" style="width:8%">Qtd</th>
+            <th class="num" style="width:11%">Valor un.</th>
+            <th class="num" style="width:11%">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${listaItens.map((i) => `<tr>
+            <td>${ui.esc(i.fornecedor_nome || '—')}</td>
+            <td>${ui.esc(i.loja || '—')}</td>
+            <td>${ui.esc(i.sku || '—')}</td>
+            <td>${ui.esc(i.descricao || '')}</td>
+            <td>${ui.esc(i.embalagem || i.unidade || '')}</td>
+            <td class="num">${ui.num(i.quantidade, 0)}</td>
+            <td class="num">${ui.brl(i.valor_unitario)}</td>
+            <td class="num">${ui.brl((Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0))}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="5" class="num">TOTAL GERAL</th>
+            <th class="num">${ui.num(tQtd, 0)}</th>
+            <th></th>
+            <th class="num">${ui.brl(tValor)}</th>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="print-rodape">
+        <div>Aprovado por: _______________________________________</div>
+        <div>Data: ____ / ____ / ________</div>
+      </div>
+      <div class="print-observacao">Documento gerado pelo sistema Sugestão de Pedido em ${
+        ui.dataHoraBR(new Date().toISOString())}.</div>
+    `;
+
+    document.body.appendChild(el);
+
+    const limpar = () => {
+      el.remove();
+      window.removeEventListener('afterprint', limpar);
+    };
+    window.addEventListener('afterprint', limpar);
+    setTimeout(limpar, 30000);
+
+    window.print();
+  }
+
+  raiz.querySelector('#imprimir')?.addEventListener('click', imprimirSugestao);
 
   desenhar();
   desenharPedidos();

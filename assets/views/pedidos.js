@@ -1,6 +1,6 @@
 // Pedidos Sugeridos: pedidos gerados a partir das sugestões.
-import { listar, atualizar, excluir } from '../api.js?v=20261122r';
-import * as ui from '../ui.js?v=20261122r';
+import { listar, atualizar, excluir } from '../api.js?v=20261122s';
+import * as ui from '../ui.js?v=20261122s';
 
 const STATUS_PEDIDO = {
   gerado: { rotulo: 'Gerado', cor: 'azul' },
