@@ -1,6 +1,6 @@
 // Sugestão de Pedido: monta a lista, importa planilha e edita quantidades.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122a';
-import * as ui from '../ui.js?v=20261122a';
+import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122b';
+import * as ui from '../ui.js?v=20261122b';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -27,8 +27,15 @@ const MODOS = [
     descricao: 'ES + vendas de todo o ciclo' },
 ];
 
+const CAMPOS_POSICAO = ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
+  'paredao_entrada', 'deposito'];
+
+// Estoque de segurança = soma das posições na loja
+export const estoqueSeguranca = (item) => CAMPOS_POSICAO
+  .reduce((s, k) => s + (Number(item[k]) || 0), 0);
+
 function calcularEstoqueManter(item) {
-  const es = Number(item.estoque_seguranca) || 0;
+  const es = estoqueSeguranca(item);
   const venda = Number(item.venda_media) || 0;
   const dias = Number(item.dias_venda) || 0;
   const prazo = Number(item.prazo_entrega) || 0;
@@ -188,9 +195,8 @@ export async function render(raiz, ctx) {
             <td title="${ui.esc(i.fornecedor_nome || '')}">${ui.esc(i.descricao || '')}</td>
             <td>${ui.esc(i.embalagem || i.unidade || '')}</td>
             <td class="num">${ui.num(estoqueTotal(i), 0)}</td>
-            <td class="num"><input type="number" step="0.001" value="${i.estoque_seguranca ?? 0}"
-                  data-es="${ui.esc(i.id)}" style="width:80px;text-align:right"
-                  ${podeEditar ? '' : 'disabled'}></td>
+            <td class="num" title="gôndola + ponto extra + geladeira + ponta + paredão + depósito">
+              ${ui.num(estoqueSeguranca(i), 0)}</td>
             <td class="num"><input type="number" step="0.001" value="${i.venda_media ?? ''}"
                   data-venda="${ui.esc(i.id)}" style="width:80px;text-align:right"
                   ${podeEditar ? '' : 'disabled'}></td>
@@ -234,24 +240,15 @@ export async function render(raiz, ctx) {
         Math.round((manter - estoqueTotal(item)) * 1000) / 1000);
       item.estoque_manter = manter;
       item.quantidade_sugerida = sugerida;
+      item.estoque_seguranca = estoqueSeguranca(item);
       await atualizar('lista_de_produtos', item.id, {
-        estoque_seguranca: Number(item.estoque_seguranca) || 0,
+        estoque_seguranca: item.estoque_seguranca,
         venda_media: item.venda_media === '' ? null : Number(item.venda_media),
         modo_estoque: item.modo_estoque || 'es_dias',
         estoque_manter: manter,
         quantidade_sugerida: sugerida,
       });
       return sugerida;
-    }
-
-    for (const el of tabela.querySelectorAll('[data-es]')) {
-      el.addEventListener('change', async () => {
-        const item = itens.find((i) => i.id === el.dataset.es);
-        if (!item) return;
-        item.estoque_seguranca = Number(el.value) || 0;
-        try { await salvarCalculo(item); desenhar(); }
-        catch (erro) { ui.toast(erro.message, 'erro'); }
-      });
     }
 
     for (const el of tabela.querySelectorAll('[data-venda]')) {
@@ -493,7 +490,6 @@ export async function render(raiz, ctx) {
             estoque_atual: num(pegar('estoque_atual')),
             quantidade: 0,
             quantidade_sugerida: 0,
-            estoque_seguranca: 0,
             modo_estoque: 'es_dias',
             ordem: i,
             importado_em: new Date().toISOString(),
@@ -510,6 +506,9 @@ export async function render(raiz, ctx) {
             : ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
               'paredao_entrada', 'deposito']
               .reduce((s, k) => s + (Number(r[k]) || 0), 0);
+          r.estoque_seguranca = ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
+            'paredao_entrada', 'deposito']
+            .reduce((s, k) => s + (Number(r[k]) || 0), 0);
           r.estoque_manter = Math.round(manter * 1000) / 1000;
           r.quantidade_sugerida = Math.max(0, Math.round((manter - atual) * 1000) / 1000);
           r.quantidade = r.quantidade_sugerida;
