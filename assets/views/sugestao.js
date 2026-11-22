@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122g';
-import * as ui from '../ui.js?v=20261122g';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122h';
+import * as ui from '../ui.js?v=20261122h';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -148,8 +148,8 @@ async function renderIndice(raiz, ctx) {
       <td>${d.criado ? ui.dataBR(d.criado) : '—'}</td>
       <td class="acoes">
         <a class="botao-pequeno" href="#/sugestao/${encodeURIComponent(nome)}">Abrir</a>
-        ${podeCriar ? `<button type="button" class="botao-pequeno"
-          data-editar="${ui.esc(nome)}">Editar</button>` : ''}
+        ${podeCriar ? `<a class="botao-pequeno"
+          href="#/sugestao/${encodeURIComponent(nome)}">Editar</a>` : ''}
         ${podeExcluir ? `<button type="button" class="botao-pequeno botao-perigo"
           data-apagar="${ui.esc(nome)}">Excluir</button>` : ''}
       </td>
@@ -234,7 +234,6 @@ async function renderIndice(raiz, ctx) {
 
         fechar();
         ctx.irPara(`#/sugestao/${encodeURIComponent(nome)}`);
-        ctx.recarregar();
       } catch (erro) {
         ui.toast(erro.message, 'erro');
         if (info) info.textContent = erro.message;
@@ -243,77 +242,6 @@ async function renderIndice(raiz, ctx) {
       }
     });
   });
-
-  for (const b of raiz.querySelectorAll('[data-editar]')) {
-    b.addEventListener('click', () => {
-      const atual = b.dataset.editar;
-      const { fechar, corpo } = ui.modal({
-        titulo: 'Editar sugestão',
-        largura: '520px',
-        corpo: `
-          <label class="campo"><span>Nome da sugestão</span>
-            <input id="nome" value="${ui.esc(atual)}"></label>
-          <label class="campo"><span>Status</span>
-            <select id="status">
-              ${Object.entries(STATUS).map(([valor, s]) => `<option value="${valor}" ${
-                (statusPorNome.get(atual)?.status || 'rascunho') === valor ? 'selected' : ''
-              }>${ui.esc(s.rotulo)}</option>`).join('')}
-            </select></label>
-          <p class="sub">Os itens e as quantidades são mantidos.</p>
-          <div class="linha-acoes" style="margin-top:12px">
-            <button type="button" class="botao-primario" id="salvar">Salvar</button>
-            <button type="button" id="cancelar">Cancelar</button>
-          </div>
-          <div class="sub" id="info" style="margin-top:8px"></div>`,
-      });
-
-      corpo.querySelector('#cancelar').addEventListener('click', fechar);
-
-      corpo.querySelector('#salvar').addEventListener('click', async () => {
-        const novo = corpo.querySelector('#nome').value.trim();
-        const novoStatus = corpo.querySelector('#status').value;
-        const info = corpo.querySelector('#info');
-        const cab = statusPorNome.get(atual);
-
-        if (!novo) { ui.toast('Informe o nome.', 'erro'); return; }
-        if (novo !== atual && grupos.has(novo)) {
-          ui.toast('Já existe uma sugestão com esse nome.', 'erro');
-          return;
-        }
-
-        const botao = corpo.querySelector('#salvar');
-        botao.disabled = true;
-        botao.textContent = 'Salvando…';
-
-        try {
-          if (novo !== atual) {
-            const afetados = itens.filter((i) => i.lista === atual);
-            for (const item of afetados) {
-              await atualizar('lista_de_produtos', item.id, { lista: novo });
-            }
-            if (info) info.textContent = `${afetados.length} item(ns) renomeado(s).`;
-          }
-
-          if (cab) {
-            await atualizar('sugestoes', cab.id, {
-              nome: novo, status: novoStatus, atualizado_em: new Date().toISOString(),
-            });
-          } else {
-            await criar('sugestoes', { nome: novo, status: novoStatus });
-          }
-
-          ui.toast(`Sugestão atualizada (${STATUS[novoStatus]?.rotulo || novoStatus}).`);
-          fechar();
-          ctx.recarregar();
-        } catch (erro) {
-          ui.toast(erro.message, 'erro');
-          if (info) info.textContent = erro.message;
-          botao.disabled = false;
-          botao.textContent = 'Salvar';
-        }
-      });
-    });
-  }
 
   for (const b of raiz.querySelectorAll('[data-apagar]')) {
     b.addEventListener('click', async () => {
@@ -375,6 +303,7 @@ async function renderEditor(raiz, ctx, lista) {
         </div>
         <div class="linha-acoes">
           <a class="botao-pequeno" href="#/sugestao">← Voltar</a>
+          ${podeEditar ? '<button type="button" class="botao-pequeno" id="editar-sugestao">Editar</button>' : ''}
           ${podeEditar ? '<button type="button" class="botao-pequeno" id="adicionar-item">Adicionar item</button>' : ''}
           ${podeEditar ? '<button type="button" class="botao-pequeno" id="importar">Importar lista</button>' : ''}
           ${podeEditar ? '<button type="button" class="botao-primario" id="finalizar">Finalizar</button>' : ''}
@@ -565,6 +494,74 @@ async function renderEditor(raiz, ctx, lista) {
       });
     }
   }
+
+  // ----------------------------------------------------------------- editar
+  raiz.querySelector('#editar-sugestao')?.addEventListener('click', () => {
+    const { fechar, corpo } = ui.modal({
+      titulo: 'Editar sugestão',
+      largura: '520px',
+      corpo: `
+        <label class="campo"><span>Nome da sugestão</span>
+          <input id="nome" value="${ui.esc(lista)}"></label>
+        <label class="campo"><span>Status</span>
+          <select id="status">
+            ${Object.entries(STATUS).map(([valor, s]) => `<option value="${valor}" ${
+              (cabecalho?.status || 'rascunho') === valor ? 'selected' : ''
+            }>${ui.esc(s.rotulo)}</option>`).join('')}
+          </select></label>
+        <p class="sub">Os itens e as quantidades são mantidos.</p>
+        <div class="linha-acoes" style="margin-top:12px">
+          <button type="button" class="botao-primario" id="salvar">Salvar</button>
+          <button type="button" id="cancelar">Cancelar</button>
+        </div>
+        <div class="sub" id="info" style="margin-top:8px"></div>`,
+    });
+
+    corpo.querySelector('#cancelar').addEventListener('click', fechar);
+
+    corpo.querySelector('#salvar').addEventListener('click', async () => {
+      const novo = corpo.querySelector('#nome').value.trim();
+      const novoStatus = corpo.querySelector('#status').value;
+      const info = corpo.querySelector('#info');
+
+      if (!novo) { ui.toast('Informe o nome.', 'erro'); return; }
+
+      const botao = corpo.querySelector('#salvar');
+      botao.disabled = true;
+      botao.textContent = 'Salvando…';
+
+      try {
+        if (novo !== lista) {
+          const existentes = await listar('sugestoes', { eq: { nome: novo } });
+          if (existentes.length) {
+            throw new Error('Já existe uma sugestão com esse nome.');
+          }
+          for (const item of daLista()) {
+            await atualizar('lista_de_produtos', item.id, { lista: novo });
+          }
+          if (info) info.textContent = 'itens renomeados';
+        }
+
+        if (cabecalho) {
+          await atualizar('sugestoes', cabecalho.id, {
+            nome: novo, status: novoStatus, atualizado_em: new Date().toISOString(),
+          });
+        } else {
+          await criar('sugestoes', { nome: novo, status: novoStatus });
+        }
+
+        ui.toast('Sugestão atualizada.');
+        fechar();
+        ctx.irPara(`#/sugestao/${encodeURIComponent(novo)}`);
+        ctx.recarregar();
+      } catch (erro) {
+        ui.toast(erro.message, 'erro');
+        if (info) info.textContent = erro.message;
+        botao.disabled = false;
+        botao.textContent = 'Salvar';
+      }
+    });
+  });
 
   // --------------------------------------------------------- adicionar item
   raiz.querySelector('#adicionar-item')?.addEventListener('click', () => {
