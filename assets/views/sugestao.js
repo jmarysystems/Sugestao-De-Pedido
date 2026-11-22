@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122n';
-import * as ui from '../ui.js?v=20261122n';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122o';
+import * as ui from '../ui.js?v=20261122o';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -852,7 +852,8 @@ async function renderEditor(raiz, ctx, lista) {
         const catPorCod = porCodigo(cats);
         const subPorCod = porCodigo(subs);
         const famPorCod = porCodigo(fams);
-        const prodPorSku = new Map(todosProdutos.map((p) => [String(p.sku).trim(), p]));
+        const prodPorSku = new Map((todosProdutos || [])
+          .map((p) => [String(p.sku).trim(), p]));
         const lojasNorm = lojas.map((l) => ({
           loja: l, fantasia: normaliza(l.nome_fantasia), razao: normaliza(l.nome),
         }));
@@ -924,9 +925,15 @@ async function renderEditor(raiz, ctx, lista) {
           if (!sku) return null;
           if (prodPorSku.has(sku)) return prodPorSku.get(sku).id;
 
-          const novo = await criar('produtos', {
+          // a lista em memória pode vir truncada (limite de 1000 no PostgREST)
+          const achados = await listar('produtos', { select: 'id, sku', eq: { sku } });
+          if (achados.length) {
+            prodPorSku.set(sku, achados[0]);
+            return achados[0].id;
+          }
+
+          const base = {
             sku,
-            ean: registro.ean || sku,
             descricao: registro.descricao || sku,
             unidade: registro.embalagem || 'UN',
             ativo: true,
@@ -934,9 +941,19 @@ async function renderEditor(raiz, ctx, lista) {
             categoria_id: vinculos.categoria_id,
             subcategoria_id: vinculos.subcategoria_id,
             familia_id: vinculos.familia_id,
-          });
-          prodPorSku.set(sku, novo);
-          return novo.id;
+          };
+
+          for (const ean of [registro.ean || sku, sku, null]) {
+            try {
+              const novo = await criar('produtos', { ...base, ean });
+              prodPorSku.set(sku, novo);
+              return novo.id;
+            } catch (erro) {
+              if (!/existe/i.test(erro.message)) throw erro;
+            }
+          }
+
+          throw new Error(`Não foi possível criar o produto SKU ${sku}.`);
         }
 
         const registros = [];

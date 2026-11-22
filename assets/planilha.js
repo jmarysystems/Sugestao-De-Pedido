@@ -1,5 +1,5 @@
 // Leitura de planilha e importação de listas (usada nas telas de Listas e Sugestão).
-import { listar, criar } from './api.js?v=20261122n';
+import { listar, criar } from './api.js?v=20261122o';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -141,7 +141,8 @@ async function prepararCadastros(registros, aoProgredir) {
   const catPorCod = porCodigo(cats);
   const subPorCod = porCodigo(subs);
   const famPorCod = porCodigo(fams);
-  const prodPorSku = new Map(produtos.map((p) => [String(p.sku).trim(), p]));
+  // PostgREST devolve no máximo 1000 linhas: produtos são consultados sob demanda
+  const prodPorSku = new Map((produtos || []).map((p) => [String(p.sku).trim(), p]));
   // lojas: índice por fantasia e por razão social, para achar de várias formas
   const lojasNorm = lojas.map((l) => ({
     loja: l,
@@ -220,10 +221,18 @@ async function prepararCadastros(registros, aoProgredir) {
   async function produto(registro, vinculos) {
     const sku = String(registro.sku ?? '').trim();
     if (!sku) return null;
+
     if (prodPorSku.has(sku)) return prodPorSku.get(sku).id;
-    const novo = await criar('produtos', {
+
+    // procura no banco antes de criar (a lista em memória pode estar incompleta)
+    const achados = await listar('produtos', { select: 'id, sku', eq: { sku } });
+    if (achados.length) {
+      prodPorSku.set(sku, achados[0]);
+      return achados[0].id;
+    }
+
+    const base = {
       sku,
-      ean: registro.ean || sku,
       descricao: registro.descricao || sku,
       unidade: registro.embalagem || 'UN',
       ativo: true,
@@ -231,9 +240,19 @@ async function prepararCadastros(registros, aoProgredir) {
       categoria_id: vinculos.categoria_id,
       subcategoria_id: vinculos.subcategoria_id,
       familia_id: vinculos.familia_id,
-    });
-    prodPorSku.set(sku, novo);
-    return novo.id;
+    };
+
+    for (const ean of [registro.ean || sku, sku, null]) {
+      try {
+        const novo = await criar('produtos', { ...base, ean });
+        prodPorSku.set(sku, novo);
+        return novo.id;
+      } catch (erro) {
+        if (!/existe/i.test(erro.message)) throw erro;
+      }
+    }
+
+    throw new Error(`Não foi possível criar o produto SKU ${sku}.`);
   }
 
   let indice = 0;
@@ -265,7 +284,7 @@ export async function importarLista({
   }
 
   if (limpar) {
-    const { excluirOnde } = await import('./api.js?v=20261122n');
+    const { excluirOnde } = await import('./api.js?v=20261122o');
     await excluirOnde('lista_de_produtos', { lista });
   }
 
