@@ -1,6 +1,6 @@
 // Listas: gerencia as listas de sugestão de pedido.
-import { listar, atualizar, excluirOnde } from '../api.js?v=20261122h';
-import * as ui from '../ui.js?v=20261122h';
+import { listar, atualizar, excluirOnde } from '../api.js?v=20261122i';
+import * as ui from '../ui.js?v=20261122i';
 
 export async function render(raiz, ctx) {
   ctx.setTitulo('Listas');

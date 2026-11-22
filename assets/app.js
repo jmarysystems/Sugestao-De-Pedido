@@ -1,11 +1,11 @@
 // Shell: login, layout e rotas do sistema Sugestão de Pedido.
-import { sb, sair, sessao, perfilAtual, entrar, minhasPermissoes } from './api.js?v=20261122h';
-import { SISTEMA } from './config.js?v=20261122h';
-import * as ui from './ui.js?v=20261122h';
-import * as dashboard from './views/dashboard.js?v=20261122h';
-import * as sugestao from './views/sugestao.js?v=20261122h';
-import * as pedidos from './views/pedidos.js?v=20261122h';
-import * as listas from './views/listas.js?v=20261122h';
+import { sb, sair, sessao, perfilAtual, entrar, minhasPermissoes } from './api.js?v=20261122i';
+import { SISTEMA } from './config.js?v=20261122i';
+import * as ui from './ui.js?v=20261122i';
+import * as dashboard from './views/dashboard.js?v=20261122i';
+import * as sugestao from './views/sugestao.js?v=20261122i';
+import * as pedidos from './views/pedidos.js?v=20261122i';
+import * as listas from './views/listas.js?v=20261122i';
 
 const app = document.getElementById('app');
 let perfil = null;
@@ -102,7 +102,12 @@ async function navegar() {
   if (!raiz) return;
 
   const caminho = (location.hash || '#/dashboard').replace(/^#\/?/, '');
-  const segmento = caminho.split('/')[0];
+  const partes = caminho.split('/');
+  const segmento = partes[0];
+  let id = null;
+  if (partes.length > 1 && partes[1]) {
+    try { id = decodeURIComponent(partes[1]); } catch (_) { id = partes[1]; }
+  }
 
   for (const link of document.querySelectorAll('.nav-item')) {
     const href = link.getAttribute('href') || '';
@@ -113,6 +118,7 @@ async function navegar() {
 
   const ctx = {
     perfil,
+    id,
     pode: (modulo, acao) => {
       const p = perfil.permissoes || {};
       if (p.admin) return true;
