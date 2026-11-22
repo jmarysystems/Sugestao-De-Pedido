@@ -1,6 +1,6 @@
 // Pedidos Sugeridos: agrupa os itens da lista por fornecedor.
-import { listar } from '../api.js?v=20261122c';
-import * as ui from '../ui.js?v=20261122c';
+import { listar } from '../api.js?v=20261122d';
+import * as ui from '../ui.js?v=20261122d';
 
 export async function render(raiz, ctx) {
   ctx.setTitulo('Pedidos Sugeridos');

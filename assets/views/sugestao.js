@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122c';
-import * as ui from '../ui.js?v=20261122c';
+import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122d';
+import * as ui from '../ui.js?v=20261122d';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -92,6 +92,8 @@ function mapearCabecalho(linhaCabecalho) {
   return mapa;
 }
 
+const body_focus = (el) => { try { el.focus(); el.select(); } catch (_) { /* opcional */ } };
+
 // --------------------------------------------------------------------- índice
 export async function render(raiz, ctx) {
   if (ctx.id) return renderEditor(raiz, ctx, ctx.id);
@@ -133,6 +135,8 @@ async function renderIndice(raiz, ctx) {
       <td>${d.criado ? ui.dataBR(d.criado) : '—'}</td>
       <td class="acoes">
         <a class="botao-pequeno" href="#/sugestao/${encodeURIComponent(nome)}">Abrir</a>
+        ${podeCriar ? `<button type="button" class="botao-pequeno"
+          data-editar="${ui.esc(nome)}">Editar</button>` : ''}
         ${podeExcluir ? `<button type="button" class="botao-pequeno botao-perigo"
           data-apagar="${ui.esc(nome)}">Excluir</button>` : ''}
       </td>
@@ -224,6 +228,62 @@ async function renderIndice(raiz, ctx) {
       }
     });
   });
+
+  for (const b of raiz.querySelectorAll('[data-editar]')) {
+    b.addEventListener('click', () => {
+      const atual = b.dataset.editar;
+      const { fechar, corpo } = ui.modal({
+        titulo: 'Editar sugestão',
+        largura: '520px',
+        corpo: `
+          <label class="campo"><span>Nome da sugestão</span>
+            <input id="nome" value="${ui.esc(atual)}"></label>
+          <p class="sub">Os itens e as quantidades são mantidos.</p>
+          <div class="linha-acoes" style="margin-top:12px">
+            <button type="button" class="botao-primario" id="salvar">Salvar</button>
+            <button type="button" id="cancelar">Cancelar</button>
+          </div>
+          <div class="sub" id="info" style="margin-top:8px"></div>`,
+      });
+
+      body_focus(corpo.querySelector('#nome'));
+      corpo.querySelector('#cancelar').addEventListener('click', fechar);
+
+      corpo.querySelector('#salvar').addEventListener('click', async () => {
+        const novo = corpo.querySelector('#nome').value.trim();
+        const info = corpo.querySelector('#info');
+
+        if (!novo) { ui.toast('Informe o nome.', 'erro'); return; }
+        if (novo === atual) { fechar(); return; }
+        if (grupos.has(novo)) { ui.toast('Já existe uma sugestão com esse nome.', 'erro'); return; }
+
+        const botao = corpo.querySelector('#salvar');
+        botao.disabled = true;
+        botao.textContent = 'Salvando…';
+
+        try {
+          const afetados = itens.filter((i) => i.lista === atual);
+          const TAMANHO = 100;
+          for (let i = 0; i < afetados.length; i += TAMANHO) {
+            const lote = afetados.slice(i, i + TAMANHO);
+            for (const item of lote) {
+              await atualizar('lista_de_produtos', item.id, { lista: novo });
+            }
+            if (info) info.textContent = `renomeando ${Math.min(i + TAMANHO, afetados.length)}/${afetados.length}…`;
+          }
+
+          ui.toast(`${afetados.length} item(ns) movido(s) para "${novo}".`);
+          fechar();
+          ctx.recarregar();
+        } catch (erro) {
+          ui.toast(erro.message, 'erro');
+          if (info) info.textContent = erro.message;
+          botao.disabled = false;
+          botao.textContent = 'Salvar';
+        }
+      });
+    });
+  }
 
   for (const b of raiz.querySelectorAll('[data-apagar]')) {
     b.addEventListener('click', async () => {
