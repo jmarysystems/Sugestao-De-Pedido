@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122j';
-import * as ui from '../ui.js?v=20261122j';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122k';
+import * as ui from '../ui.js?v=20261122k';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -837,6 +837,91 @@ async function renderEditor(raiz, ctx, lista) {
           throw new Error('Não encontrei as colunas de SKU/descrição no arquivo.');
         }
 
+
+        // ---------- cadastros: cria o que não existe e guarda o vínculo
+        const [cats, subs, fams, lojas, todosProdutos] = await Promise.all([
+          listar('arm_categorias', { ordem: 'descricao' }),
+          listar('arm_subcategorias', { ordem: 'descricao' }),
+          listar('arm_familias', { ordem: 'descricao' }),
+          listar('arm_lojas', { ordem: 'nome' }),
+          listar('produtos', { select: 'id, sku', ordem: 'sku' }),
+        ]);
+
+        const porCodigo = (lista) => new Map(
+          lista.map((x) => [String(x.codigo_auxiliar ?? '').trim(), x]));
+        const catPorCod = porCodigo(cats);
+        const subPorCod = porCodigo(subs);
+        const famPorCod = porCodigo(fams);
+        const prodPorSku = new Map(todosProdutos.map((p) => [String(p.sku).trim(), p]));
+        const lojaPorNome = new Map(
+          lojas.map((l) => [normaliza(l.nome_fantasia || l.nome), l]));
+
+        if (info) info.textContent = 'verificando cadastros…';
+
+        async function obterCategoria(codigo, descricao) {
+          const chave = String(codigo ?? '').trim();
+          if (chave && catPorCod.has(chave)) return catPorCod.get(chave).id;
+          const nome = (descricao || '').trim() || (chave ? `Categoria ${chave}` : 'Sem Categoria');
+          const novo = await criar('arm_categorias', {
+            codigo_auxiliar: chave || null, descricao: nome,
+          });
+          catPorCod.set(String(novo.codigo_auxiliar ?? '').trim(), novo);
+          return novo.id;
+        }
+
+        async function obterSubcategoria(codigo, descricao, categoriaId) {
+          const chave = String(codigo ?? '').trim();
+          if (chave && subPorCod.has(chave)) return subPorCod.get(chave).id;
+          const nome = (descricao || '').trim() || (chave ? `Subcategoria ${chave}` : 'Sem Subcategoria');
+          const novo = await criar('arm_subcategorias', {
+            codigo_auxiliar: chave || null, descricao: nome, categoria_id: categoriaId,
+          });
+          subPorCod.set(String(novo.codigo_auxiliar ?? '').trim(), novo);
+          return novo.id;
+        }
+
+        async function obterFamilia(codigo, descricao, subcategoriaId) {
+          const chave = String(codigo ?? '').trim();
+          if (chave && famPorCod.has(chave)) return famPorCod.get(chave).id;
+          const nome = (descricao || '').trim() || (chave ? `Família ${chave}` : 'Sem Família');
+          const novo = await criar('arm_familias', {
+            codigo_auxiliar: chave || null, descricao: nome, subcategoria_id: subcategoriaId,
+          });
+          famPorCod.set(String(novo.codigo_auxiliar ?? '').trim(), novo);
+          return novo.id;
+        }
+
+        async function obterLoja(nome) {
+          const chave = normaliza(nome);
+          if (!chave) return null;
+          if (lojaPorNome.has(chave)) return lojaPorNome.get(chave).id;
+          const nova = await criar('arm_lojas', {
+            nome: nome, nome_fantasia: nome, ativa: true,
+          });
+          lojaPorNome.set(chave, nova);
+          return nova.id;
+        }
+
+        async function obterProduto(registro, vinculos) {
+          const sku = String(registro.sku ?? '').trim();
+          if (!sku) return null;
+          if (prodPorSku.has(sku)) return prodPorSku.get(sku).id;
+
+          const novo = await criar('produtos', {
+            sku,
+            ean: registro.ean || sku,
+            descricao: registro.descricao || sku,
+            unidade: registro.embalagem || 'UN',
+            ativo: true,
+            origem: 'sugestao',
+            categoria_id: vinculos.categoria_id,
+            subcategoria_id: vinculos.subcategoria_id,
+            familia_id: vinculos.familia_id,
+          });
+          prodPorSku.set(sku, novo);
+          return novo.id;
+        }
+
         const registros = [];
         for (let i = 1; i < linhas.length; i += 1) {
           const linha = linhas[i];
@@ -875,6 +960,20 @@ async function renderEditor(raiz, ctx, lista) {
             ordem: i,
             importado_em: new Date().toISOString(),
           };
+
+          // cria/recupera os cadastros e guarda os vínculos
+          const categoriaId = await obterCategoria(registro.codigo_categoria, registro.categoria);
+          const subcategoriaId = await obterSubcategoria(
+            registro.codigo_subcategoria, registro.subcategoria, categoriaId);
+          const familiaId = await obterFamilia(
+            registro.codigo_familia, registro.familia, subcategoriaId);
+
+          registro.loja_id = await obterLoja(registro.loja);
+          registro.produto_id = await obterProduto(registro, {
+            categoria_id: categoriaId,
+            subcategoria_id: subcategoriaId,
+            familia_id: familiaId,
+          });
 
           registro.estoque_seguranca = CAMPOS_POSICAO
             .reduce((s, k) => s + (Number(registro[k]) || 0), 0);
