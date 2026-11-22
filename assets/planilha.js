@@ -1,5 +1,5 @@
 // Leitura de planilha e importação de listas (usada nas telas de Listas e Sugestão).
-import { listar, criar } from './api.js?v=20261122m';
+import { listar, criar } from './api.js?v=20261122n';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -142,7 +142,30 @@ async function prepararCadastros(registros, aoProgredir) {
   const subPorCod = porCodigo(subs);
   const famPorCod = porCodigo(fams);
   const prodPorSku = new Map(produtos.map((p) => [String(p.sku).trim(), p]));
-  const lojaPorNome = new Map(lojas.map((l) => [normaliza(l.nome_fantasia || l.nome), l]));
+  // lojas: índice por fantasia e por razão social, para achar de várias formas
+  const lojasNorm = lojas.map((l) => ({
+    loja: l,
+    fantasia: normaliza(l.nome_fantasia),
+    razao: normaliza(l.nome),
+  }));
+
+  function acharLoja(chave) {
+    if (!chave) return null;
+
+    const porFantasia = lojasNorm.find((x) => x.fantasia && x.fantasia === chave);
+    if (porFantasia) return porFantasia.loja;
+
+    const porRazao = lojasNorm.find((x) => x.razao === chave);
+    if (porRazao) return porRazao.loja;
+
+    // "LOJA 01" encontra "LOJA 01 - MESSEJANA"
+    const porPrefixo = lojasNorm.find((x) =>
+      (x.fantasia && x.fantasia.startsWith(`${chave} `))
+      || (x.razao && x.razao.startsWith(`${chave} `))
+      || (x.fantasia && x.fantasia.startsWith(`${chave}-`))
+      || (x.razao && x.razao.startsWith(`${chave}-`)));
+    return porPrefixo ? porPrefixo.loja : null;
+  }
 
   async function categoria(codigo, descricao) {
     const chave = String(codigo ?? '').trim();
@@ -183,9 +206,14 @@ async function prepararCadastros(registros, aoProgredir) {
   async function loja(nome) {
     const chave = normaliza(nome);
     if (!chave) return null;
-    if (lojaPorNome.has(chave)) return lojaPorNome.get(chave).id;
-    const nova = await criar('arm_lojas', { nome: nome, nome_fantasia: nome, ativa: true });
-    lojaPorNome.set(chave, nova);
+
+    const existente = acharLoja(chave);
+    if (existente) return existente.id;
+
+    const nova = await criar('arm_lojas', {
+      nome: String(nome).trim(), nome_fantasia: String(nome).trim(), ativa: true,
+    });
+    lojasNorm.push({ loja: nova, fantasia: chave, razao: chave });
     return nova.id;
   }
 
@@ -237,7 +265,7 @@ export async function importarLista({
   }
 
   if (limpar) {
-    const { excluirOnde } = await import('./api.js?v=20261122m');
+    const { excluirOnde } = await import('./api.js?v=20261122n');
     await excluirOnde('lista_de_produtos', { lista });
   }
 

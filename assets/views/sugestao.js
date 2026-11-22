@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122m';
-import * as ui from '../ui.js?v=20261122m';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122n';
+import * as ui from '../ui.js?v=20261122n';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -853,8 +853,21 @@ async function renderEditor(raiz, ctx, lista) {
         const subPorCod = porCodigo(subs);
         const famPorCod = porCodigo(fams);
         const prodPorSku = new Map(todosProdutos.map((p) => [String(p.sku).trim(), p]));
-        const lojaPorNome = new Map(
-          lojas.map((l) => [normaliza(l.nome_fantasia || l.nome), l]));
+        const lojasNorm = lojas.map((l) => ({
+          loja: l, fantasia: normaliza(l.nome_fantasia), razao: normaliza(l.nome),
+        }));
+
+        function acharLoja(chave) {
+          if (!chave) return null;
+          const exata = lojasNorm.find((x) => x.fantasia === chave || x.razao === chave);
+          if (exata) return exata.loja;
+          const prefixo = lojasNorm.find((x) =>
+            (x.fantasia && x.fantasia.startsWith(`${chave} `))
+            || (x.razao && x.razao.startsWith(`${chave} `))
+            || (x.fantasia && x.fantasia.startsWith(`${chave}-`))
+            || (x.razao && x.razao.startsWith(`${chave}-`)));
+          return prefixo ? prefixo.loja : null;
+        }
 
         if (info) info.textContent = 'verificando cadastros…';
 
@@ -895,11 +908,14 @@ async function renderEditor(raiz, ctx, lista) {
         async function obterLoja(nome) {
           const chave = normaliza(nome);
           if (!chave) return null;
-          if (lojaPorNome.has(chave)) return lojaPorNome.get(chave).id;
+
+          const existente = acharLoja(chave);
+          if (existente) return existente.id;
+
           const nova = await criar('arm_lojas', {
-            nome: nome, nome_fantasia: nome, ativa: true,
+            nome: String(nome).trim(), nome_fantasia: String(nome).trim(), ativa: true,
           });
-          lojaPorNome.set(chave, nova);
+          lojasNorm.push({ loja: nova, fantasia: chave, razao: chave });
           return nova.id;
         }
 
