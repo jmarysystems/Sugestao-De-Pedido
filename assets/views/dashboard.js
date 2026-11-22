@@ -1,6 +1,6 @@
 // Dashboard da Sugestão de Pedido.
-import { listar } from '../api.js?v=20261121c';
-import * as ui from '../ui.js?v=20261121c';
+import { listar } from '../api.js?v=20261122a';
+import * as ui from '../ui.js?v=20261122a';
 
 export async function render(raiz, ctx) {
   ctx.setTitulo('Dashboard');

@@ -1,6 +1,6 @@
 // Sugestão de Pedido: monta a lista, importa planilha e edita quantidades.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261121c';
-import * as ui from '../ui.js?v=20261121c';
+import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122a';
+import * as ui from '../ui.js?v=20261122a';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -65,6 +65,8 @@ const COLUNAS = {
   prazo_entrega: ['PRAZO DE ENTREGA DO FORNECEDOR', 'PRAZO DE ENTREGA', 'PRAZO'],
   dias_venda: ['PEDIDO PARA QUANTOS DIAS DE VENDA', 'DIAS DE VENDA', 'DIAS'],
   valor_unitario: ['VALOR UNITARIO', 'CUSTO', 'PRECO'],
+  venda_media: ['VENDA MEDIA DIARIA', 'VENDA MEDIA', 'VENDA MEDIA DIA'],
+  estoque_atual: ['ESTOQUE ATUAL', 'ESTOQUE'],
 };
 
 function mapearCabecalho(linhaCabecalho) {
@@ -147,9 +149,14 @@ export async function render(raiz, ctx) {
     .filter((i) => i.lista === lista)
     .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-  const estoqueTotal = (i) => ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
-    'paredao_entrada', 'deposito']
-    .reduce((s, k) => s + (Number(i[k]) || 0), 0);
+  const estoqueTotal = (i) => {
+    if (i.estoque_atual !== null && i.estoque_atual !== undefined && i.estoque_atual !== '') {
+      return Number(i.estoque_atual) || 0;
+    }
+    return ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
+      'paredao_entrada', 'deposito']
+      .reduce((s, k) => s + (Number(i[k]) || 0), 0);
+  };
 
   function desenhar() {
     nomeLista.textContent = `— ${lista}`;
@@ -482,13 +489,31 @@ export async function render(raiz, ctx) {
             prazo_entrega: num(pegar('prazo_entrega')),
             dias_venda: num(pegar('dias_venda')),
             valor_unitario: num(pegar('valor_unitario')),
+            venda_media: num(pegar('venda_media')),
+            estoque_atual: num(pegar('estoque_atual')),
             quantidade: 0,
+            quantidade_sugerida: 0,
+            estoque_seguranca: 0,
+            modo_estoque: 'es_dias',
             ordem: i,
             importado_em: new Date().toISOString(),
           });
         }
 
         if (!registros.length) throw new Error('O arquivo não tem linhas de produto.');
+
+        // já calcula o estoque a manter e a quantidade sugerida
+        for (const r of registros) {
+          const manter = calcularEstoqueManter(r);
+          const atual = (r.estoque_atual !== null && r.estoque_atual !== undefined)
+            ? Number(r.estoque_atual) || 0
+            : ['gondola', 'ponto_extra', 'geladeira', 'ponta_gondola',
+              'paredao_entrada', 'deposito']
+              .reduce((s, k) => s + (Number(r[k]) || 0), 0);
+          r.estoque_manter = Math.round(manter * 1000) / 1000;
+          r.quantidade_sugerida = Math.max(0, Math.round((manter - atual) * 1000) / 1000);
+          r.quantidade = r.quantidade_sugerida;
+        }
 
         if (limpar) {
           await excluirOnde('lista_de_produtos', { lista: destino });
