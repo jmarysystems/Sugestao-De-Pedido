@@ -1,11 +1,11 @@
 // Shell: login, layout e rotas do sistema Sugestão de Pedido.
-import { sb, sair, sessao, perfilAtual, entrar, minhasPermissoes } from './api.js?v=20261122l';
-import { SISTEMA } from './config.js?v=20261122l';
-import * as ui from './ui.js?v=20261122l';
-import * as dashboard from './views/dashboard.js?v=20261122l';
-import * as sugestao from './views/sugestao.js?v=20261122l';
-import * as pedidos from './views/pedidos.js?v=20261122l';
-import * as listas from './views/listas.js?v=20261122l';
+import { sb, sair, sessao, perfilAtual, entrar, minhasPermissoes } from './api.js?v=20261122m';
+import { SISTEMA } from './config.js?v=20261122m';
+import * as ui from './ui.js?v=20261122m';
+import * as dashboard from './views/dashboard.js?v=20261122m';
+import * as sugestao from './views/sugestao.js?v=20261122m';
+import * as pedidos from './views/pedidos.js?v=20261122m';
+import * as listas from './views/listas.js?v=20261122m';
 
 const app = document.getElementById('app');
 let perfil = null;

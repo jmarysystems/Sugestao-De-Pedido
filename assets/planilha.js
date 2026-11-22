@@ -1,5 +1,5 @@
 // Leitura de planilha e importação de listas (usada nas telas de Listas e Sugestão).
-import { listar, criar } from './api.js?v=20261122l';
+import { listar, criar } from './api.js?v=20261122m';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -167,12 +167,13 @@ async function prepararCadastros(registros, aoProgredir) {
     return novo.id;
   }
 
-  async function familia(codigo, descricao, subcategoriaId) {
+  async function familia(codigo, descricao, categoriaId, subcategoriaId) {
     const chave = String(codigo ?? '').trim();
     if (chave && famPorCod.has(chave)) return famPorCod.get(chave).id;
     const novo = await criar('arm_familias', {
       codigo_auxiliar: chave || null,
       descricao: (descricao || '').trim() || (chave ? `Família ${chave}` : 'Sem Família'),
+      categoria_id: categoriaId,
       subcategoria_id: subcategoriaId,
     });
     famPorCod.set(String(novo.codigo_auxiliar ?? '').trim(), novo);
@@ -212,7 +213,7 @@ async function prepararCadastros(registros, aoProgredir) {
     indice += 1;
     const catId = await categoria(registro.codigo_categoria, registro.categoria);
     const subId = await subcategoria(registro.codigo_subcategoria, registro.subcategoria, catId);
-    const famId = await familia(registro.codigo_familia, registro.familia, subId);
+    const famId = await familia(registro.codigo_familia, registro.familia, catId, subId);
 
     registro.loja_id = await loja(registro.loja);
     registro.produto_id = await produto(registro, {
@@ -236,7 +237,7 @@ export async function importarLista({
   }
 
   if (limpar) {
-    const { excluirOnde } = await import('./api.js?v=20261122l');
+    const { excluirOnde } = await import('./api.js?v=20261122m');
     await excluirOnde('lista_de_produtos', { lista });
   }
 

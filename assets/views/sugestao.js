@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122l';
-import * as ui from '../ui.js?v=20261122l';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122m';
+import * as ui from '../ui.js?v=20261122m';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -880,12 +880,13 @@ async function renderEditor(raiz, ctx, lista) {
           return novo.id;
         }
 
-        async function obterFamilia(codigo, descricao, subcategoriaId) {
+        async function obterFamilia(codigo, descricao, categoriaId, subcategoriaId) {
           const chave = String(codigo ?? '').trim();
           if (chave && famPorCod.has(chave)) return famPorCod.get(chave).id;
           const nome = (descricao || '').trim() || (chave ? `Família ${chave}` : 'Sem Família');
           const novo = await criar('arm_familias', {
-            codigo_auxiliar: chave || null, descricao: nome, subcategoria_id: subcategoriaId,
+            codigo_auxiliar: chave || null, descricao: nome,
+            categoria_id: categoriaId, subcategoria_id: subcategoriaId,
           });
           famPorCod.set(String(novo.codigo_auxiliar ?? '').trim(), novo);
           return novo.id;
@@ -966,7 +967,7 @@ async function renderEditor(raiz, ctx, lista) {
           const subcategoriaId = await obterSubcategoria(
             registro.codigo_subcategoria, registro.subcategoria, categoriaId);
           const familiaId = await obterFamilia(
-            registro.codigo_familia, registro.familia, subcategoriaId);
+            registro.codigo_familia, registro.familia, categoriaId, subcategoriaId);
 
           registro.loja_id = await obterLoja(registro.loja);
           registro.produto_id = await obterProduto(registro, {
