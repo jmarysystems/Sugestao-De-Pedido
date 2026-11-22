@@ -1,14 +1,19 @@
 // Pedidos Sugeridos: pedidos gerados a partir das sugestões.
-import { listar, atualizar, excluir } from '../api.js?v=20261122q';
-import * as ui from '../ui.js?v=20261122q';
+import { listar, atualizar, excluir } from '../api.js?v=20261122r';
+import * as ui from '../ui.js?v=20261122r';
+
+const STATUS_PEDIDO = {
+  gerado: { rotulo: 'Gerado', cor: 'azul' },
+  enviado: { rotulo: 'Enviado', cor: 'verde' },
+  cancelado: { rotulo: 'Cancelado', cor: 'vermelho' },
+};
 
 export async function render(raiz, ctx) {
   ctx.setTitulo('Pedidos Sugeridos');
 
-  const [pedidos, sugestoes] = await Promise.all([
-    listar('sugestoes_pedidos', { ordem: 'criado_em', asc: false, limite: 500 }),
-    listar('sugestoes', { ordem: 'nome' }),
-  ]);
+  const pedidos = await listar('sugestoes_pedidos', {
+    ordem: 'criado_em', asc: false, limite: 500,
+  });
 
   if (!pedidos.length) {
     raiz.innerHTML = `
@@ -54,8 +59,9 @@ export async function render(raiz, ctx) {
             <td class="num">${ui.num(p.total_itens, 0)}</td>
             <td class="num">${ui.num(p.quantidade, 0)}</td>
             <td class="num">${ui.brl(p.valor_total)}</td>
-            <td>${p.status === 'enviado'
-              ? ui.badge('enviado', 'verde') : ui.badge('gerado', 'azul')}</td>
+            <td>${ui.badge(
+              (STATUS_PEDIDO[p.status] || STATUS_PEDIDO.gerado).rotulo,
+              (STATUS_PEDIDO[p.status] || STATUS_PEDIDO.gerado).cor)}</td>
             <td>${p.criado_em ? ui.dataBR(p.criado_em) : '—'}</td>
             <td class="acoes">
               <button type="button" class="botao-pequeno"
@@ -75,6 +81,7 @@ export async function render(raiz, ctx) {
       </table></div>
     </div>`;
 
+    // ---------------------------------------------------------- itens
     for (const b of alvo.querySelectorAll('[data-itens]')) {
       b.addEventListener('click', () => {
         const pedido = pedidos.find((p) => p.id === b.dataset.itens);
@@ -103,83 +110,83 @@ export async function render(raiz, ctx) {
         });
       });
     }
-  }
 
-  const STATUS_PEDIDO = {
-    gerado: { rotulo: 'Gerado', cor: 'azul' },
-    enviado: { rotulo: 'Enviado', cor: 'verde' },
-    cancelado: { rotulo: 'Cancelado', cor: 'vermelho' },
-  };
+    // --------------------------------------------------------- editar
+    for (const b of alvo.querySelectorAll('[data-editar]')) {
+      b.addEventListener('click', () => {
+        const pedido = pedidos.find((p) => p.id === b.dataset.editar);
+        if (!pedido) return;
 
-  for (const b of alvo.querySelectorAll('[data-editar]')) {
-    b.addEventListener('click', () => {
-      const pedido = pedidos.find((p) => p.id === b.dataset.editar);
-      if (!pedido) return;
+        const { fechar, corpo } = ui.modal({
+          titulo: `Editar pedido — ${pedido.fornecedor_nome || ''}`,
+          largura: '520px',
+          corpo: `
+            <label class="campo"><span>Fornecedor</span>
+              <input id="fornecedor" value="${ui.esc(pedido.fornecedor_nome || '')}"></label>
+            <label class="campo"><span>Status</span>
+              <select id="status">
+                ${Object.entries(STATUS_PEDIDO).map(([valor, s]) => `<option value="${valor}" ${
+                  (pedido.status || 'gerado') === valor ? 'selected' : ''
+                }>${ui.esc(s.rotulo)}</option>`).join('')}
+              </select></label>
+            <p class="sub">Os itens e os valores do pedido são mantidos.</p>
+            <div class="linha-acoes" style="margin-top:12px">
+              <button type="button" class="botao-primario" id="salvar">Salvar</button>
+              <button type="button" id="cancelar">Cancelar</button>
+            </div>
+            <div class="sub" id="info" style="margin-top:8px"></div>`,
+        });
 
-      const { fechar, corpo } = ui.modal({
-        titulo: `Editar pedido — ${pedido.fornecedor_nome || ''}`,
-        largura: '520px',
-        corpo: `
-          <label class="campo"><span>Fornecedor</span>
-            <input id="fornecedor" value="${ui.esc(pedido.fornecedor_nome || '')}"></label>
-          <label class="campo"><span>Status</span>
-            <select id="status">
-              ${Object.entries(STATUS_PEDIDO).map(([valor, s]) => `<option value="${valor}" ${
-                (pedido.status || 'gerado') === valor ? 'selected' : ''
-              }>${ui.esc(s.rotulo)}</option>`).join('')}
-            </select></label>
-          <p class="sub">Os itens e os valores do pedido são mantidos.</p>
-          <div class="linha-acoes" style="margin-top:12px">
-            <button type="button" class="botao-primario" id="salvar">Salvar</button>
-            <button type="button" id="cancelar">Cancelar</button>
-          </div>
-          <div class="sub" id="info" style="margin-top:8px"></div>`,
+        corpo.querySelector('#cancelar').addEventListener('click', fechar);
+
+        corpo.querySelector('#salvar').addEventListener('click', async () => {
+          const fornecedor = corpo.querySelector('#fornecedor').value.trim();
+          const status = corpo.querySelector('#status').value;
+          const info = corpo.querySelector('#info');
+
+          if (!fornecedor) { ui.toast('Informe o fornecedor.', 'erro'); return; }
+
+          const botao = corpo.querySelector('#salvar');
+          botao.disabled = true;
+          botao.textContent = 'Salvando…';
+
+          try {
+            await atualizar('sugestoes_pedidos', pedido.id, {
+              fornecedor_nome: fornecedor, status,
+            });
+            ui.toast('Pedido atualizado.');
+            fechar();
+            ctx.recarregar();
+          } catch (erro) {
+            ui.toast(erro.message, 'erro');
+            if (info) info.textContent = erro.message;
+            botao.disabled = false;
+            botao.textContent = 'Salvar';
+          }
+        });
       });
+    }
 
-      corpo.querySelector('#cancelar').addEventListener('click', fechar);
-
-      corpo.querySelector('#salvar').addEventListener('click', async () => {
-        const fornecedor = corpo.querySelector('#fornecedor').value.trim();
-        const status = corpo.querySelector('#status').value;
-        const info = corpo.querySelector('#info');
-
-        if (!fornecedor) { ui.toast('Informe o fornecedor.', 'erro'); return; }
-
-        const botao = corpo.querySelector('#salvar');
-        botao.disabled = true;
-        botao.textContent = 'Salvando…';
-
+    // -------------------------------------------------------- excluir
+    for (const b of alvo.querySelectorAll('[data-excluir]')) {
+      b.addEventListener('click', async () => {
+        const pedido = pedidos.find((p) => p.id === b.dataset.excluir);
+        if (!pedido) return;
+        if (!window.confirm(
+          `Excluir o pedido de ${pedido.fornecedor_nome || ''} (${ui.brl(pedido.valor_total)})?`)) {
+          return;
+        }
+        b.disabled = true;
         try {
-          await atualizar('sugestoes_pedidos', pedido.id, {
-            fornecedor_nome: fornecedor, status,
-          });
-          ui.toast('Pedido atualizado.');
-          fechar();
+          await excluir('sugestoes_pedidos', pedido.id);
+          ui.toast('Pedido excluído.');
           ctx.recarregar();
         } catch (erro) {
           ui.toast(erro.message, 'erro');
-          if (info) info.textContent = erro.message;
-          botao.disabled = false;
-          botao.textContent = 'Salvar';
+          b.disabled = false;
         }
       });
-    });
-  }
-
-  for (const b of alvo.querySelectorAll('[data-excluir]')) {
-    b.addEventListener('click', async () => {
-      const pedido = pedidos.find((p) => p.id === b.dataset.excluir);
-      if (!pedido) return;
-      if (!window.confirm(
-        `Excluir o pedido de ${pedido.fornecedor_nome || ''} (${ui.brl(pedido.valor_total)})?`)) {
-        return;
-      }
-      try {
-        await excluir('sugestoes_pedidos', pedido.id);
-        ui.toast('Pedido excluído.');
-        ctx.recarregar();
-      } catch (erro) { ui.toast(erro.message, 'erro'); }
-    });
+    }
   }
 
   filtro.addEventListener('change', desenhar);
