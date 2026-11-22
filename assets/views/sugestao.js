@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122k';
-import * as ui from '../ui.js?v=20261122k';
+import { listar, atualizar, criar, excluir, excluirOnde } from '../api.js?v=20261122l';
+import * as ui from '../ui.js?v=20261122l';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
