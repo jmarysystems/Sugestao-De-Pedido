@@ -1,6 +1,6 @@
 // Sugestão de Pedido: lista de sugestões (índice) e edição de uma sugestão.
-import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122d';
-import * as ui from '../ui.js?v=20261122d';
+import { listar, criar, atualizar, excluir, excluirOnde } from '../api.js?v=20261122e';
+import * as ui from '../ui.js?v=20261122e';
 
 const PLANILHA_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
 
@@ -13,6 +13,13 @@ const num = (v) => {
   if (typeof v === 'number') return v;
   const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
   return Number.isNaN(n) ? null : n;
+};
+
+const STATUS = {
+  rascunho: { rotulo: 'Rascunho', cor: 'neutro' },
+  enviada: { rotulo: 'Enviada', cor: 'azul' },
+  aprovada: { rotulo: 'Aprovada', cor: 'verde' },
+  cancelada: { rotulo: 'Cancelada', cor: 'vermelho' },
 };
 
 const MODOS = [
@@ -106,8 +113,12 @@ async function renderIndice(raiz, ctx) {
   const podeCriar = ctx.pode('sugestao', 'cadastrar') || ctx.pode('sugestao', 'editar');
   const podeExcluir = ctx.pode('sugestao', 'excluir');
 
-  const itens = await listar('lista_de_produtos', { ordem: 'ordem' });
+  const [itens, cabecalhos] = await Promise.all([
+    listar('lista_de_produtos', { ordem: 'ordem' }),
+    listar('sugestoes', { ordem: 'nome' }),
+  ]);
 
+  const statusPorNome = new Map(cabecalhos.map((c) => [c.nome, c]));
   const grupos = new Map();
   for (const item of itens) {
     const atual = grupos.get(item.lista) || {
@@ -126,8 +137,12 @@ async function renderIndice(raiz, ctx) {
 
   const linhas = [...grupos.entries()]
     .sort((a, b) => (b[1].criado || '').localeCompare(a[1].criado || ''))
-    .map(([nome, d]) => `<tr>
+    .map(([nome, d]) => {
+      const cab = statusPorNome.get(nome);
+      const st = STATUS[cab?.status || 'rascunho'] || STATUS.rascunho;
+      return `<tr>
       <td><strong>${ui.esc(nome)}</strong></td>
+      <td>${ui.badge(st.rotulo, st.cor)}</td>
       <td class="num">${ui.num(d.itens, 0)}</td>
       <td class="num">${ui.num(d.sugerida, 0)}</td>
       <td class="num">${ui.brl(d.valor)}</td>
@@ -140,7 +155,8 @@ async function renderIndice(raiz, ctx) {
         ${podeExcluir ? `<button type="button" class="botao-pequeno botao-perigo"
           data-apagar="${ui.esc(nome)}">Excluir</button>` : ''}
       </td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
 
   raiz.innerHTML = `
     <div class="cartao">
@@ -151,7 +167,7 @@ async function renderIndice(raiz, ctx) {
       <p class="sub">Cada sugestão é uma lista de produtos com as quantidades a pedir.
         Abra para editar ou crie uma nova a partir de uma lista existente.</p>
       ${grupos.size ? `<div class="tabela-rolagem"><table>
-        <thead><tr><th>Sugestão</th><th class="num">Itens</th>
+        <thead><tr><th>Sugestão</th><th>Status</th><th class="num">Itens</th>
           <th class="num">Qtd sugerida</th><th class="num">Valor</th>
           <th>Lojas</th><th>Criada em</th><th></th></tr></thead>
         <tbody>${linhas}</tbody>
@@ -198,6 +214,8 @@ async function renderIndice(raiz, ctx) {
       botao.textContent = 'Criando…';
 
       try {
+        await criar('sugestoes', { nome, status: 'rascunho' });
+
         if (base) {
           const origem = itens.filter((i) => i.lista === base);
           const TAMANHO = 100;
@@ -238,6 +256,12 @@ async function renderIndice(raiz, ctx) {
         corpo: `
           <label class="campo"><span>Nome da sugestão</span>
             <input id="nome" value="${ui.esc(atual)}"></label>
+          <label class="campo"><span>Status</span>
+            <select id="status">
+              ${Object.entries(STATUS).map(([valor, s]) => `<option value="${valor}" ${
+                (statusPorNome.get(atual)?.status || 'rascunho') === valor ? 'selected' : ''
+              }>${ui.esc(s.rotulo)}</option>`).join('')}
+            </select></label>
           <p class="sub">Os itens e as quantidades são mantidos.</p>
           <div class="linha-acoes" style="margin-top:12px">
             <button type="button" class="botao-primario" id="salvar">Salvar</button>
@@ -251,11 +275,15 @@ async function renderIndice(raiz, ctx) {
 
       corpo.querySelector('#salvar').addEventListener('click', async () => {
         const novo = corpo.querySelector('#nome').value.trim();
+        const novoStatus = corpo.querySelector('#status').value;
         const info = corpo.querySelector('#info');
+        const cab = statusPorNome.get(atual);
 
         if (!novo) { ui.toast('Informe o nome.', 'erro'); return; }
-        if (novo === atual) { fechar(); return; }
-        if (grupos.has(novo)) { ui.toast('Já existe uma sugestão com esse nome.', 'erro'); return; }
+        if (novo !== atual && grupos.has(novo)) {
+          ui.toast('Já existe uma sugestão com esse nome.', 'erro');
+          return;
+        }
 
         const botao = corpo.querySelector('#salvar');
         botao.disabled = true;
@@ -272,7 +300,18 @@ async function renderIndice(raiz, ctx) {
             if (info) info.textContent = `renomeando ${Math.min(i + TAMANHO, afetados.length)}/${afetados.length}…`;
           }
 
-          ui.toast(`${afetados.length} item(ns) movido(s) para "${novo}".`);
+          // atualiza o cabeçalho (nome e/ou status)
+          if (cab) {
+            await atualizar('sugestoes', cab.id, {
+              nome: novo,
+              status: novoStatus,
+              atualizado_em: new Date().toISOString(),
+            });
+          } else {
+            await criar('sugestoes', { nome: novo, status: novoStatus });
+          }
+
+          ui.toast(`Sugestão atualizada (${STATUS[novoStatus]?.rotulo || novoStatus}).`);
           fechar();
           ctx.recarregar();
         } catch (erro) {
@@ -291,6 +330,8 @@ async function renderIndice(raiz, ctx) {
       if (!window.confirm(`Excluir a sugestão "${nome}" e todos os seus itens?`)) return;
       try {
         await excluirOnde('lista_de_produtos', { lista: nome });
+        const cab = statusPorNome.get(nome);
+        if (cab) await excluir('sugestoes', cab.id);
         ui.toast('Sugestão excluída.');
         ctx.recarregar();
       } catch (erro) { ui.toast(erro.message, 'erro'); }
