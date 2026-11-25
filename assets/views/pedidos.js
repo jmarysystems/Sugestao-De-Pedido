@@ -1,6 +1,6 @@
 // Pedidos Sugeridos: pedidos gerados a partir das sugestões.
-import { listar, atualizar, excluir } from '../api.js?v=20261122t';
-import * as ui from '../ui.js?v=20261122t';
+import { listar, atualizar, excluir } from '../api.js?v=20261125a';
+import * as ui from '../ui.js?v=20261125a';
 
 const STATUS_PEDIDO = {
   gerado: { rotulo: 'Gerado', cor: 'azul' },
@@ -11,9 +11,32 @@ const STATUS_PEDIDO = {
 export async function render(raiz, ctx) {
   ctx.setTitulo('Pedidos Sugeridos');
 
-  const pedidos = await listar('sugestoes_pedidos', {
-    ordem: 'criado_em', asc: false, limite: 500,
-  });
+  const [pedidos, fornecedores] = await Promise.all([
+    listar('sugestoes_pedidos', { ordem: 'criado_em', asc: false, limite: 500 }),
+    listar('fornecedores', { select: 'id, razao_social, cnpj_cpf' }),
+  ]);
+
+  const fornecedorPorId = new Map(fornecedores.map((f) => [f.id, f]));
+  const fornecedorPorNome = new Map(
+    fornecedores.map((f) => [(f.razao_social || '').toUpperCase(), f]));
+
+  function cnpjDoFornecedor(pedido) {
+    const porId = pedido.fornecedor_id ? fornecedorPorId.get(pedido.fornecedor_id) : null;
+    const achado = porId
+      || fornecedorPorNome.get((pedido.fornecedor_nome || '').toUpperCase());
+    return achado?.cnpj_cpf || '';
+  }
+
+  function formatarCnpj(valor) {
+    const d = String(valor || '').replace(/\D/g, '');
+    if (d.length === 14) {
+      return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+    }
+    if (d.length === 11) {
+      return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+    }
+    return valor || '';
+  }
 
   if (!pedidos.length) {
     raiz.innerHTML = `
@@ -128,6 +151,8 @@ export async function render(raiz, ctx) {
           <div>
             <h1>PEDIDO SUGERIDO</h1>
             <div class="print-linha">Fornecedor: <strong>${ui.esc(pedido.fornecedor_nome || '—')}</strong></div>
+            <div class="print-linha">CNPJ: <strong>${
+              ui.esc(formatarCnpj(cnpjDoFornecedor(pedido)) || '—')}</strong></div>
             <div class="print-linha">Sugestão de origem: ${ui.esc(pedido.sugestao || '—')}</div>
           </div>
           <div style="text-align:right">
